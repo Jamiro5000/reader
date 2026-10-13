@@ -102,8 +102,11 @@
     /* ========================================================================
        CSS SECTION 4 — THE "● REC" BADGE  (your small recording indicator)
        This is the small sign that filming is happening. It stays on screen
-       even when you've swiped the control bar away. It only shows up while
-       actually recording.
+       even when you've swiped the control bar away. It has two looks:
+         • red, throbbing "● REC 0:12"            = recording right now
+         • grey "● Camera on · not recording"     = Ready is on, waiting for
+                                                    Start or the Action Button
+       It's hidden when the camera is off.
        ======================================================================== */
     #recBadge {
       position: fixed;
@@ -119,12 +122,40 @@
       z-index: 60;
       backdrop-filter: blur(6px);
     }
-    body.recording #recBadge { display: flex; }  /* show it while the body is "recording" */
+    body.recording #recBadge, body.standby #recBadge { display: flex; }
     #recBadge .dot {
       width: 9px; height: 9px; border-radius: 50%;
       background: var(--rec);
       animation: pulse 1.4s infinite;  /* makes the red dot gently throb */
     }
+    body.standby #recBadge { color: var(--muted); font-weight: 500; }
+    body.standby #recBadge .dot { background: var(--muted); animation: none; }  /* grey, still */
+
+    /* A short message that pops up for a few seconds, e.g. "Action Button:
+       ● Recording". Mostly so you can see a button press arrive. */
+    #toast {
+      position: fixed; left: 16px; right: 16px; margin: 0 auto;
+      width: max-content; max-width: calc(100% - 32px);
+      top: calc(env(safe-area-inset-top) + 52px);
+      background: rgba(20,22,28,.94); color: var(--ink);
+      border: 1px solid var(--line); border-radius: 14px;
+      padding: 10px 14px; font-family: -apple-system, system-ui, sans-serif;
+      font-size: 14px; text-align: center; z-index: 130;
+      opacity: 0; pointer-events: none; transition: opacity .25s;
+    }
+    #toast.show { opacity: 1; }
+
+    /* The yellow strip shown while this phone isn't set up for the Action
+       Button. Tap it to hide it for this visit. */
+    #pairWarn {
+      position: fixed; left: 12px; right: 12px;
+      top: calc(env(safe-area-inset-top) + 52px);
+      background: #3a3216; color: #ffe9a8; border: 1px solid #5c4d1c;
+      border-radius: 12px; padding: 11px 14px;
+      font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.4;
+      display: none; z-index: 70;
+    }
+    #pairWarn.show { display: block; }
     @keyframes pulse {
       0%   { opacity: 1; }
       50%  { opacity: .35; }
@@ -407,10 +438,14 @@
       <div id="actionSection">
         <h2>Action Button</h2>
         <p id="remoteStatus">Checking…</p>
-        <p><b>Each time:</b> tap <b>Ready</b> in the bottom bar (it turns green
-          and the camera switches on). Then press the Action Button to start and
-          stop, even with the video full screen. About two seconds later a
-          banner at the top tells you what happened.</p>
+        <p><b>How it works:</b> pressing and holding the Action Button does
+          exactly what tapping <b>Start</b> / <b>Stop</b> does. Start turns
+          red and says <b>■ Stop</b>, and the top-left badge shows
+          <b>● REC</b>. About two seconds later a banner at the top of the
+          screen confirms it.</p>
+        <p><b>Ready is optional.</b> It switches the camera on early but does
+          NOT record (the badge says “Camera on · not recording”). Tap it before
+          going full screen so the first press starts instantly.</p>
         <p>Works on any Wi-Fi or on mobile data. Your Mac isn't needed.</p>
         <p><b>One-time setup:</b> open your setup link on this phone once, add
           the <b>Record</b> shortcut, then in iPhone <b>Settings → Action
@@ -434,6 +469,11 @@
 
   <!-- A hidden error strip, filled in by JavaScript only when needed. -->
   <div id="err"></div>
+
+  <!-- The pop-up message, and the "not set up" strip (both hidden until needed). -->
+  <div id="toast"></div>
+  <div id="pairWarn"><b>Action Button not set up on this phone.</b> Scan your
+    setup QR code once, then come back to this tab. (Tap to hide.)</div>
 
 <script>
 /* ============================================================================
@@ -560,15 +600,40 @@ async function openCamera() {
   // If a camera was already on, switch it off first so we can reopen the other side.
   if (stream) stream.getTracks().forEach(t => t.stop());
 
+  stream = null;
+
   // Ask the browser for the chosen camera + the microphone. This is the moment
   // iPhone shows its "Allow camera & microphone?" prompt (only the first time).
-  stream = await navigator.mediaDevices.getUserMedia({
+  const ask = navigator.mediaDevices.getUserMedia({
     video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
     audio: true
   });
 
+  // Don't wait forever. If iPhone is stuck on a question you can't see (like
+  // "Allow camera?" hidden behind a full-screen video), give up after 10
+  // seconds so the next press can try again.
+  let timer;
+  const tooSlow = new Promise((_, fail) => { timer = setTimeout(() => fail(new Error('timeout')), 10000); });
+  try {
+    stream = await Promise.race([ask, tooSlow]);
+  } catch (e) {
+    // If the camera does turn up later anyway, switch it straight off, so it's
+    // never left on by surprise.
+    if (e.message === 'timeout') ask.then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+
   preview.srcObject = stream;                         // plug it into the invisible box
   return stream;
+}
+
+// The sentence to show when the camera wouldn't switch on.
+function cameraProblem(e) {
+  return (e && e.message === 'timeout')
+    ? "The camera didn't start. Leave full screen, tap Ready, and allow the camera if iPhone asks."
+    : BLOCKED;
 }
 
 // Is the camera switched on and working right now? (iPhone switches it off by
@@ -602,13 +667,14 @@ async function flip() {
 function showFacing() { flipBtn.textContent = facing === 'user' ? '⇄ Front' : '⇄ Back'; }
 showFacing();   // label the button correctly as soon as the page opens
 
-/* "READY": the camera stays on between recordings.
-   Starting the camera takes a moment, and it's the one step iPhone might
-   refuse while a video is full screen. So for the Action Button, you tap Ready
-   once beforehand. The camera then sits switched on (iPhone's green dot shows)
-   but NOT recording. Each Action Button press then just starts or stops the
-   recording on the camera that's already running, which is instant. Tap Ready
-   again to switch the camera off. */
+/* "READY" (optional): switches the camera on early, WITHOUT recording.
+   Ready does not record anything. Recording starts only when you tap Start or
+   press the Action Button (the two do exactly the same thing). Ready simply
+   gets the camera going beforehand, so a press starts recording instantly.
+   It's also the safe way to answer iPhone's "Allow camera?" question before
+   the video goes full screen. While Ready is on and you're not recording, the
+   top-left badge says "Camera on · not recording". Tap Ready again to switch
+   the camera off. */
 async function toggleReady() {
   if (ready) {
     ready = false;
@@ -621,16 +687,24 @@ async function toggleReady() {
       ready = true;
       requestWake();                                  // keep the screen awake while ready
     } catch (e) {
-      showErr(BLOCKED);
+      showErr(cameraProblem(e));
     }
     readyBtn.disabled = false;
   }
   showReady();
 }
-// Green "✓ Ready" when on, plain "Ready" when off.
+// Green "✓ Ready" when on, plain "Ready" when off. Also updates the badge.
 function showReady() {
   readyBtn.classList.toggle('on', ready);
   readyBtn.textContent = ready ? '✓ Ready' : 'Ready';
+  showBadge();
+}
+// The top-left badge: red "● REC 0:12" while recording, grey "Camera on · not
+// recording" while Ready has the camera on, hidden otherwise.
+function showBadge() {
+  const standby = !recording && ready && cameraLive();
+  document.body.classList.toggle('standby', standby);
+  if (standby) badgeTime.textContent = 'Camera on · not recording';
 }
 
 /* ---- 4. THE RECORDING ----
@@ -663,8 +737,11 @@ async function start() {
     if (!cameraLive()) await openCamera();            // reuse the camera if "Ready" has it on
   } catch (e) {
     starting = false;
-    showErr(BLOCKED);
-    return "Couldn't switch the camera on. Open the page and tap Ready first.";
+    showErr(cameraProblem(e));
+    showBadge();
+    return e && e.message === 'timeout'
+      ? "The camera didn't start (iPhone may be asking “Allow camera?”). Leave full screen and tap Ready."
+      : "Couldn't switch the camera on. Open the page and tap Ready first.";
   }
   starting = false;
 
@@ -691,6 +768,7 @@ async function start() {
   recBtn.textContent = '■ Stop';
   flipBtn.disabled = true;                             // grey out flip while filming
   startTimer();
+  showBadge();
   return '';
 }
 
@@ -708,6 +786,7 @@ function stop() {
   if (recorder.state !== 'inactive') recorder.stop(); // triggers finish()
   // With "Ready" on, the camera stays on for the next press. Otherwise: camera light off.
   if (!ready) { closeCamera(); releaseWake(); }
+  showBadge();
   return recorder.takeNo;
 }
 
@@ -770,7 +849,8 @@ function releaseWake(){ try { if (wakeLock) { wakeLock.release(); wakeLock = nul
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (recording || ready) requestWake();
-  if (ready && !recording && !cameraLive()) openCamera().catch(() => {});
+  if (ready && !recording && !cameraLive()) openCamera().then(showBadge, showBadge);
+  showBadge();
 });
 
 /* ---- 5c. AUTO-SCROLL THE TEXT ----
@@ -934,41 +1014,94 @@ if (location.protocol !== 'https:' && location.hostname !== 'localhost' && locat
    press your button. */
 const RELAY = 'https://ntfy.sh/';
 const remoteStatus = document.getElementById('remoteStatus');
+const pairWarn = document.getElementById('pairWarn');
+let line = null;        // the open line to ntfy.sh
+let lineCode = null;    // the pair code that line is listening to
+let remoteState = '';   // 'on', 'off' or 'unpaired'
 
 // Opened through the setup link? Save the pair code, then tidy the address
 // bar so the code doesn't sit there on screen.
-const pairMatch = location.hash.match(/pair=([A-Za-z0-9_-]{16,60})/);
-if (pairMatch) {
-  localStorage.setItem('pairCode', pairMatch[1]);
+function takePairCodeFromLink() {
+  const m = location.hash.match(/pair=([A-Za-z0-9_-]{16,60})/);
+  if (!m) return;
+  localStorage.setItem('pairCode', m[1]);
   history.replaceState(null, '', location.pathname + location.search);
 }
-const pairCode = localStorage.getItem('pairCode');
-// If the setup link is opened while this page is already open, the page
-// doesn't reload by itself, so reload it to pick up the code.
-window.addEventListener('hashchange', () => { if (/pair=/.test(location.hash)) location.reload(); });
+takePairCodeFromLink();
 
+// Start listening, unless we already are. Safe to call again and again, which
+// is how a tab that was opened BEFORE you scanned the setup code catches up.
 function listenForActionButton() {
-  if (!pairCode) { showRemote('unpaired'); return; }
+  takePairCodeFromLink();
+  const code = localStorage.getItem('pairCode');
+  if (!code) { showRemote('unpaired'); return; }
+  if (line && lineCode === code && line.readyState !== EventSource.CLOSED) return;  // already listening
+  if (line) line.close();
+  lineCode = code;
   // EventSource keeps a line open to ntfy.sh, and reconnects by itself if it drops.
-  const line = new EventSource(RELAY + pairCode + '/sse');
-  line.onopen = () => showRemote('on');
-  line.onerror = () => showRemote('off');
+  line = new EventSource(RELAY + code + '/sse');
+  line.onopen = () => {
+    if (remoteState !== 'on') { toast('✓ Action Button connected'); log('listening'); }
+    showRemote('on');
+  };
+  line.onerror = () => {
+    showRemote('off');
+    if (line.readyState === EventSource.CLOSED) setTimeout(listenForActionButton, 5000);  // gave up: try again
+  };
   line.onmessage = e => {
     let msg;
     try { msg = JSON.parse(e.data); } catch (_) { return; }
     if (msg.event !== 'message' || msg.message !== 'toggle') return;
-    // Ignore a press that's more than 15 seconds old. That can happen if this
+    // Ignore a press that's more than 20 seconds old. That can happen if this
     // tab was asleep in the background and wakes up later. It must never
     // start recording by surprise.
-    if (Math.abs(Date.now() - msg.time * 1000) > 15000) return;
+    const age = Math.round(Date.now() / 1000 - msg.time);
+    if (Math.abs(age) > 20) { log('ignored a press that was ' + age + 's old'); return; }
     answerPress();
   };
 }
+// Catch up when: the setup link was opened in another tab, this tab comes back
+// into view, or Safari restores it from memory.
+window.addEventListener('storage', e => { if (e.key === 'pairCode') listenForActionButton(); });
+window.addEventListener('hashchange', listenForActionButton);
+window.addEventListener('pageshow', listenForActionButton);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) listenForActionButton(); });
 
-// Do the press, then post what happened. The Shortcut shows that as a banner.
+// Do the press exactly like tapping Start/Stop, then post what happened (the
+// Shortcut shows that as a banner). It always answers, even if something
+// goes wrong, so the banner can say what.
 async function answerPress() {
-  const result = await remoteToggle();
-  fetch(RELAY + pairCode + '_r', { method: 'POST', body: result.text }).catch(() => {});
+  // If the camera is off, switching it on can take a moment, longer than the
+  // Shortcut waits. So say so straight away, then report the result.
+  if (!recording && !starting && !cameraLive()) {
+    fetch(RELAY + lineCode + '_r', { method: 'POST', body: '◌ Switching the camera on…' }).catch(() => {});
+  }
+  let result;
+  try {
+    result = await remoteToggle();
+  } catch (e) {
+    result = { ok: false, text: '⚠️ Something went wrong: ' + (e && e.message ? e.message : e) };
+    log('error: ' + result.text);
+  }
+  toast('Action Button: ' + result.text);
+  fetch(RELAY + lineCode + '_r', { method: 'POST', body: result.text }).catch(() => {});
+}
+
+// A short private note to ntfy.sh, on a third channel (pair code + "_d"), about
+// what the page is doing, e.g. "listening". Only the person holding the pair
+// code can read it. It exists so problems can be tracked down remotely.
+function log(text) {
+  if (lineCode) fetch(RELAY + lineCode + '_d', { method: 'POST', body: text }).catch(() => {});
+}
+
+// Pop up a short message for a few seconds.
+let toastTimer;
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
 }
 
 // Start if stopped, stop if recording. Gives back the sentence for the banner.
@@ -985,12 +1118,17 @@ async function remoteToggle() {
 
 // The line in Settings that says whether the Action Button can reach this page.
 function showRemote(state) {
+  remoteState = state;
+  pairWarn.classList.toggle('show', state === 'unpaired' && !pairWarn.dataset.hidden);
   remoteStatus.innerHTML = {
     on: '✓ Listening for the Action Button.',
     off: '✗ Can’t reach the relay right now (no internet?). It keeps retrying by itself.',
-    unpaired: '✗ Not set up on this phone yet. Open your setup link once (the QR code from setup).'
+    unpaired: '✗ Not set up on this phone yet. Scan your setup QR code once, then come back to this tab.'
   }[state];
 }
+
+// Tap the yellow strip to hide it for this visit.
+pairWarn.addEventListener('click', () => { pairWarn.dataset.hidden = '1'; pairWarn.classList.remove('show'); });
 
 listenForActionButton();
 </script>
