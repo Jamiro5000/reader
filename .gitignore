@@ -1,0 +1,5 @@
+# Only the page itself is published. Everything else here stays on this Mac
+# (the secret pair code, the Shortcut that contains it, the cloudflared program).
+*
+!index.html
+!.gitignore
