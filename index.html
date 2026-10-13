@@ -335,11 +335,22 @@
     }
     #saved video { max-width: 100%; max-height: 40vh; border-radius: 12px; background:#000; }
     #saved p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0; }
-    #clipList { width: 100%; display: flex; flex-direction: column; gap: 10px; }
-    .saveLink {
-      display: block; background: var(--accent); color: #fff;
-      text-decoration: none; font-weight: 600; padding: 14px 22px; border-radius: 12px;
+    #clipList { width: 100%; display: flex; flex-direction: column; gap: 14px; }
+    /* One row per clip: a big "Save to Photos" button, and a small
+       "Save to Files" link under it as a backup. */
+    .clipRow { display: flex; flex-direction: column; gap: 6px; }
+    .photosBtn {
+      width: 100%; background: var(--accent); color: #fff;
+      font-weight: 600; padding: 14px 22px; border-radius: 12px;
     }
+    .photosBtn.done { background: #15803d; }        /* turns green once it's been sent */
+    .filesLink { color: var(--muted); font-size: 13px; }
+
+    /* The 0.5× / 1× / 2× zoom choice in Settings: three buttons side by side,
+       the chosen one highlighted. */
+    .seg { display: flex; gap: 8px; margin: 4px 0 6px; }
+    .seg button { flex: 1; font-weight: 600; }
+    .seg button.on { background: var(--accent); color: #fff; }
 
     /* A small red error strip, shown only if something goes wrong. */
     #err {
@@ -413,6 +424,14 @@
        ========================================================================== -->
   <div id="sheet">
     <div id="sheetInner">
+      <h2>Camera zoom</h2>
+      <p>Changes straight away. 0.5× is the extra-wide lens on the back camera.</p>
+      <div class="seg" id="zoomSeg">
+        <button data-z="0.5">0.5×</button>
+        <button data-z="1">1×</button>
+        <button data-z="2">2×</button>
+      </div>
+
       <h2>YouTube video</h2>
       <p>Paste a YouTube link to play it on this page. Leave blank for none.</p>
       <input type="text" id="ytBox" placeholder="https://www.youtube.com/watch?v=…" />
@@ -599,23 +618,41 @@ loadVideo();    // draw the video now
 async function openCamera() {
   // If a camera was already on, switch it off first so we can reopen the other side.
   if (stream) stream.getTracks().forEach(t => t.stop());
-
   stream = null;
 
-  // Ask the browser for the chosen camera + the microphone. This is the moment
-  // iPhone shows its "Allow camera & microphone?" prompt (only the first time).
-  const ask = navigator.mediaDevices.getUserMedia({
-    video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: true
-  });
+  const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
+  if (facing === 'environment' && !lenses) {
+    // First time on the back camera: iPhone only reveals the names of its
+    // lenses once you've allowed the camera. So open the normal back camera,
+    // read the lens names, then switch to the right lens if needed.
+    stream = await askForCamera({ ...size, facingMode: 'environment' });
+    lenses = await findLenses();
+    const want = lensFor(zoomChoice);
+    if (want && stream.getVideoTracks()[0].getSettings().deviceId !== want) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      stream = await askForCamera({ ...size, deviceId: { exact: want } });
+    }
+  } else {
+    const want = facing === 'environment' ? lensFor(zoomChoice) : null;
+    stream = await askForCamera(want ? { ...size, deviceId: { exact: want } } : { ...size, facingMode: facing });
+  }
+  await applyZoom();
+  preview.srcObject = stream;                         // plug it into the invisible box
+  return stream;
+}
 
+// Ask the browser for a camera + the microphone. This is the moment iPhone
+// shows its "Allow camera & microphone?" prompt (only the first time).
+async function askForCamera(video) {
+  const ask = navigator.mediaDevices.getUserMedia({ video, audio: true });
   // Don't wait forever. If iPhone is stuck on a question you can't see (like
   // "Allow camera?" hidden behind a full-screen video), give up after 10
   // seconds so the next press can try again.
   let timer;
   const tooSlow = new Promise((_, fail) => { timer = setTimeout(() => fail(new Error('timeout')), 10000); });
   try {
-    stream = await Promise.race([ask, tooSlow]);
+    return await Promise.race([ask, tooSlow]);
   } catch (e) {
     // If the camera does turn up later anyway, switch it straight off, so it's
     // never left on by surprise.
@@ -624,10 +661,75 @@ async function openCamera() {
   } finally {
     clearTimeout(timer);
   }
-
-  preview.srcObject = stream;                         // plug it into the invisible box
-  return stream;
 }
+
+/* ZOOM: 0.5×, 1× or 2× (chosen in Settings, remembered on this phone).
+   The back of the iPhone has separate lenses, and Safari lists them by name:
+     • 0.5× = the "Back Ultra Wide Camera" lens
+     • 1×   = the "Back Camera" lens (the main one)
+     • 2×   = the main lens, zoomed in 2× (iPhone does this with a sharp
+              crop of its big sensor, which is what the Camera app does too)
+   The front camera has one lens, so 0.5× isn't possible there; 2× works if
+   iPhone allows zoom on it. If a choice isn't possible, the page uses 1× and
+   says so. "zoomNow" is what the camera is actually doing. */
+let zoomChoice = [0.5, 1, 2].includes(+localStorage.getItem('zoom')) ? +localStorage.getItem('zoom') : 1;
+let zoomNow = 1;
+let lenses = null;   // { ultra: id, main: id } once we've seen the lens names
+
+async function findLenses() {
+  try {
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.label);
+    const ultra = cams.find(d => /ultra wide/i.test(d.label) && !/dual|triple/i.test(d.label));
+    const main = cams.find(d => /^back camera$/i.test(d.label.trim()));
+    return { ultra: ultra ? ultra.deviceId : null, main: main ? main.deviceId : null };
+  } catch (e) {
+    return { ultra: null, main: null };
+  }
+}
+
+// Which back lens to open for a zoom choice (null = let iPhone pick).
+function lensFor(z) {
+  if (!lenses) return null;
+  return (z === 0.5 && lenses.ultra) || lenses.main || null;
+}
+
+// After the camera opens: work out the zoom we really got, and do the 2× zoom.
+async function applyZoom() {
+  const track = stream.getVideoTracks()[0];
+  zoomNow = 1;
+  if (zoomChoice === 0.5) {
+    if (/ultra wide/i.test(track.label)) zoomNow = 0.5;
+    else toast(facing === 'user' ? '0.5× only works on the back camera. Using 1×.' : '0.5× isn’t available here. Using 1×.');
+  } else if (zoomChoice === 2) {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.zoom && caps.zoom.max >= 2) {
+      try { await track.applyConstraints({ advanced: [{ zoom: 2 }] }); zoomNow = 2; } catch (e) {}
+    }
+    if (zoomNow !== 2) toast('2× zoom isn’t available on this camera. Using 1×.');
+  }
+  showZoom();
+  showBadge();   // so the badge always shows the zoom the camera is really using
+}
+
+// Pick a zoom in Settings. If the camera is on (Ready), switch lenses now.
+async function setZoom(z) {
+  if (recording) { toast('Stop recording first, then change the zoom.'); return; }
+  zoomChoice = z;
+  localStorage.setItem('zoom', String(z));
+  showZoom();
+  if (cameraLive()) {
+    try { await openCamera(); } catch (e) { showErr(cameraProblem(e)); }
+    showBadge();
+  }
+}
+
+// Highlight the chosen zoom button in Settings.
+function showZoom() {
+  document.querySelectorAll('#zoomSeg button').forEach(b => b.classList.toggle('on', +b.dataset.z === zoomChoice));
+}
+
+// "0.5×" / "2×" for the badge and banner. Nothing for plain 1×.
+function zoomLabel() { return zoomNow === 1 ? '' : (zoomNow === 0.5 ? '0.5×' : '2×'); }
 
 // The sentence to show when the camera wouldn't switch on.
 function cameraProblem(e) {
@@ -704,7 +806,7 @@ function showReady() {
 function showBadge() {
   const standby = !recording && ready && cameraLive();
   document.body.classList.toggle('standby', standby);
-  if (standby) badgeTime.textContent = 'Camera on · not recording';
+  if (standby) badgeTime.textContent = 'Camera on · not recording' + (zoomLabel() ? ' · ' + zoomLabel() : '');
 }
 
 /* ---- 4. THE RECORDING ----
@@ -801,27 +903,52 @@ function finish(rec, pieces) {
   const ext = isMp4 ? 'mp4' : 'webm';
   const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-'); // date for the filename
 
-  clips.push({ no: rec.takeNo, url, isMp4, length: rec.lengthMs, name: `recording-${stamp}.${ext}` });
+  clips.push({ no: rec.takeNo, blob, url, isMp4, length: rec.lengthMs, name: `recording-${stamp}.${ext}` });
   showClips();
   document.getElementById('saved').classList.add('open');
 }
 
-// Draw the saved screen: a playback of the newest clip, then one Save button
-// per clip, newest first.
+// Draw the saved screen: a playback of the newest clip, then one row per clip
+// (newest first). Each row has a big "Save to Photos" button and a small
+// "Save to Files" link as a backup.
 function showClips() {
   const newest = clips[clips.length - 1];
   document.getElementById('savedVideo').src = newest.url;
-  document.getElementById('clipList').innerHTML = clips.slice().reverse().map(c =>
-    `<a class="saveLink" href="${c.url}" download="${c.name}">Save clip ${c.no} · ${clock(c.length)}</a>`
-  ).join('');
+  document.getElementById('clipList').innerHTML = clips.slice().reverse().map(c => `
+    <div class="clipRow">
+      <button class="photosBtn${c.saved ? ' done' : ''}" data-no="${c.no}">${c.saved ? '✓ ' : ''}Save clip ${c.no} to Photos · ${clock(c.length)}</button>
+      <a class="filesLink" href="${c.url}" download="${c.name}">or Save to Files</a>
+    </div>`).join('');
 
-  // Honest guidance: only mp4 goes straight into Photos on iPhone.
-  const how = newest.isMp4
-    ? 'Tap a <b>Save clip</b> button, then <b>Save to Photos</b> (or Save to Files).'
-    : 'Tap a <b>Save clip</b> button to download it. This phone recorded .webm files, so use <b>Save to Files</b>; they may not appear in Photos.';
-  document.getElementById('saveHelp').innerHTML = how +
+  document.getElementById('saveHelp').innerHTML =
+    'Tap <b>Save to Photos</b>, then choose <b>Save Video</b> in the menu that opens.' +
     '<br>Clips vanish if you close or reload this page, so save the ones you want first.';
 }
+
+/* SAVE TO PHOTOS
+   A plain download in Safari can only go to the Files app. To reach Photos, we
+   hand the clip to iPhone's share sheet (the same menu as the Share button in
+   other apps). That menu has a "Save Video" option, which puts it in Photos.
+   This must happen straight from your tap, with no waiting in between, or
+   iPhone refuses to open the menu. */
+document.getElementById('clipList').addEventListener('click', e => {
+  const btn = e.target.closest('.photosBtn');
+  if (!btn) return;
+  const clip = clips.find(c => c.no === +btn.dataset.no);
+  if (!clip) return;
+  const file = new File([clip.blob], clip.name, { type: clip.isMp4 ? 'video/mp4' : clip.blob.type });
+  if (!(navigator.canShare && navigator.canShare({ files: [file] }))) {
+    // This browser can't share files (e.g. a computer). Fall back to a normal download.
+    const a = document.createElement('a');
+    a.href = clip.url; a.download = clip.name; a.click();
+    return;
+  }
+  navigator.share({ files: [file] })
+    .then(() => { clip.saved = true; showClips(); })   // turns the button green with a ✓
+    .catch(err => {
+      if (err.name !== 'AbortError') showErr('Couldn’t open the save menu: ' + err.message + '. Use “Save to Files” instead.');
+    });
+});
 
 /* ---- 5a. THE TIMER ----
    setInterval repeats a job over and over. Here it updates the clock in the
@@ -832,8 +959,9 @@ function clock(ms){                                   // turns milliseconds into
 }
 function startTimer(){
   startTime = Date.now();
-  badgeTime.textContent = 'REC 0:00';
-  timerId = setInterval(() => { badgeTime.textContent = 'REC ' + clock(Date.now() - startTime); }, 500);
+  const z = zoomLabel() ? ' · ' + zoomLabel() : '';    // e.g. "REC 0:12 · 0.5×"
+  badgeTime.textContent = 'REC 0:00' + z;
+  timerId = setInterval(() => { badgeTime.textContent = 'REC ' + clock(Date.now() - startTime) + z; }, 500);
 }
 function stopTimer(){ clearInterval(timerId); }
 
@@ -951,6 +1079,11 @@ barHandle.addEventListener('touchmove', e => {
 recBtn.addEventListener('click', () => recording ? stop() : start());
 
 readyBtn.addEventListener('click', toggleReady);                           // camera stays on
+document.getElementById('zoomSeg').addEventListener('click', e => {      // 0.5× / 1× / 2×
+  const b = e.target.closest('button');
+  if (b) setZoom(+b.dataset.z);
+});
+showZoom();   // highlight the saved zoom choice
 flipBtn.addEventListener('click', flip);                                   // front/back camera
 scrollBtn.addEventListener('click', () => scrollRAF ? stopAutoScroll() : startAutoScroll());
 gearBtn.addEventListener('click', () => sheet.classList.add('open'));       // open settings
@@ -1113,7 +1246,7 @@ async function remoteToggle() {
   }
   const problem = await start();
   if (problem) return { ok: false, text: '⚠️ ' + problem };
-  return { ok: true, text: '● Recording (' + (facing === 'user' ? 'front' : 'back') + ' camera)' };
+  return { ok: true, text: '● Recording (' + (facing === 'user' ? 'front' : 'back') + ' camera' + (zoomLabel() ? ', ' + zoomLabel() : '') + ')' };
 }
 
 // The line in Settings that says whether the Action Button can reach this page.
