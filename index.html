@@ -5,12 +5,19 @@
   ============================================================================
   This is ONE web page that does three jobs at the same time:
 
-    1. Shows you a YouTube video and/or some text to read, right here on the page.
-    2. Films you (or your whiteboard) using the phone's camera.
-    3. Saves that recording to your phone when you press Stop.
+    1. Shows you something to watch or read. It has two modes, picked with the
+       "Video" / "Text" buttons at the top:
+         • Video mode: a YouTube-style page that plays the YouTube link you
+           paste, with a list of your recent videos underneath.
+         • Text mode: just your script, to read (it can scroll by itself).
+    2. Films you (or your whiteboard) using the phone's camera. The camera and
+       microphone are ONLY switched on while you're recording, never in
+       between, to save battery.
+    3. Keeps every clip safely on the phone until you save them all to Photos
+       with one tap (the 🎞 button).
 
-  Bonus: your iPhone's Action Button can start and stop the recording too, from
-  anywhere (see section 7 of the JavaScript).
+  Your iPhone's Action Button starts and stops the recording too, from
+  anywhere (see section 9 of the JavaScript).
 
   A web page is made of three languages, and they all live in this one file:
 
@@ -22,8 +29,8 @@
               (Everything inside the <script> tag near the bottom.)
 
   Read the comments (the grey text between /* */ or after //) and you'll be able
-  to follow what each piece does. Nothing here is sent to the internet — the
-  video you record stays on your phone.
+  to follow what each piece does. The videos you record are never sent to the
+  internet: they stay on your phone.
   ============================================================================
 -->
 <html lang="en">
@@ -53,6 +60,8 @@
       --accent: #3b82f6;  /* the blue used on the main button */
       --rec: #ef4444;     /* the red used for the recording dot */
       --line: #2a2e38;    /* thin border lines */
+      --chip: #272727;    /* Video mode's grey "pill" buttons, like YouTube's */
+      --vbg: #0f0f0f;     /* Video mode's background, like YouTube's dark mode */
     }
 
     /* ========================================================================
@@ -70,10 +79,11 @@
       font-family: Georgia, "Times New Roman", serif; /* a serif font reads like an article */
       -webkit-text-size-adjust: 100%;                 /* stop iPhone auto-resizing text */
     }
+    body.mode-video, body.mode-video #top { background: var(--vbg); }
 
-    /* The body is a vertical stack: reading area on top, control bar at bottom.
-       overflow: hidden stops the whole page wobbling while you swipe the bar away
-       (only the reading area itself scrolls). */
+    /* The body is a vertical stack: the top bar, the reading/watching area, and
+       the control bar at the bottom. overflow: hidden stops the whole page
+       wobbling while you swipe the bar away (only the middle area scrolls). */
     body {
       display: flex;
       flex-direction: column;
@@ -85,12 +95,9 @@
     /* ========================================================================
        CSS SECTION 3 — THE CAMERA (NEVER SHOWN ON SCREEN)
        On purpose, there is NO camera picture on screen, for the front camera or
-       the back camera, ever. It used to float in the top corner and cover
-       the YouTube video.
-       The live camera is still plugged into a <video> box, but that box is
-       shrunk to one see-through pixel. The recording doesn't use this box (it
-       reads the camera directly). We keep it only as a safety net, because this
-       page hasn't been tried on a real iPhone yet.
+       the back camera, ever. The live camera is plugged into a <video> box that
+       is shrunk to one see-through pixel. (The recording reads the camera
+       directly; the box is only a safety net.)
        ======================================================================== */
     #preview {
       position: fixed; left: 0; top: 0;
@@ -102,43 +109,49 @@
     /* ========================================================================
        CSS SECTION 4 — THE "● REC" BADGE  (your small recording indicator)
        This is the small sign that filming is happening. It stays on screen
-       even when you've swiped the control bar away. It has two looks:
-         • red, throbbing "● REC 0:12 · Back 1×"   = recording right now
-         • grey "● Back 1× · not recording"        = Ready is on, waiting for
-                                                     Start or the Action Button
+       even when you've swiped the control bar away, and even in full screen.
+         • grey "Starting camera…"               = the camera is switching on
+         • red, throbbing "● REC 0:12 · Back 1×"  = recording right now
        "Back 1×" is the camera that's really on and its zoom, so you can check
-       it without a preview on screen.
-       It's hidden when the camera is off.
+       it without a camera picture on screen.
+       It's hidden when you're not recording (the camera is off then).
        ======================================================================== */
     #recBadge {
       position: fixed;
-      top: calc(env(safe-area-inset-top) + 12px);
+      top: calc(env(safe-area-inset-top) + 10px);
       left: calc(env(safe-area-inset-left) + 12px);
       display: none;                   /* hidden until recording starts */
       align-items: center; gap: 7px;
-      background: rgba(0,0,0,.55);
+      background: rgba(0,0,0,.6);
+      color: #fff;
       padding: 6px 11px;
       border-radius: 999px;            /* fully rounded pill shape */
       font-family: -apple-system, system-ui, sans-serif;
       font-size: 13px; font-weight: 600;
-      z-index: 60;
+      z-index: 95;                     /* above everything, even full screen */
       backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
     }
-    body.recording #recBadge, body.standby #recBadge { display: flex; }
+    body.recording #recBadge, body.starting #recBadge { display: flex; }
     #recBadge .dot {
       width: 9px; height: 9px; border-radius: 50%;
       background: var(--rec);
       animation: pulse 1.4s infinite;  /* makes the red dot gently throb */
     }
-    body.standby #recBadge { color: var(--muted); font-weight: 500; }
-    body.standby #recBadge .dot { background: var(--muted); animation: none; }  /* grey, still */
+    body.starting #recBadge { color: var(--muted); font-weight: 500; }
+    body.starting #recBadge .dot { background: var(--muted); animation: none; }  /* grey, still */
+    @keyframes pulse {
+      0%   { opacity: 1; }
+      50%  { opacity: .35; }
+      100% { opacity: 1; }
+    }
 
     /* A short message that pops up for a few seconds, e.g. "Action Button:
        ● Recording". Mostly so you can see a button press arrive. */
     #toast {
       position: fixed; left: 16px; right: 16px; margin: 0 auto;
       width: max-content; max-width: calc(100% - 32px);
-      top: calc(env(safe-area-inset-top) + 52px);
+      top: calc(env(safe-area-inset-top) + 56px);
       background: rgba(20,22,28,.94); color: var(--ink);
       border: 1px solid var(--line); border-radius: 14px;
       padding: 10px 14px; font-family: -apple-system, system-ui, sans-serif;
@@ -151,59 +164,168 @@
        Button. Tap it to hide it for this visit. */
     #pairWarn {
       position: fixed; left: 12px; right: 12px;
-      top: calc(env(safe-area-inset-top) + 52px);
+      top: calc(env(safe-area-inset-top) + 56px);
       background: #3a3216; color: #ffe9a8; border: 1px solid #5c4d1c;
       border-radius: 12px; padding: 11px 14px;
       font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.4;
       display: none; z-index: 70;
     }
     #pairWarn.show { display: block; }
-    @keyframes pulse {
-      0%   { opacity: 1; }
-      50%  { opacity: .35; }
-      100% { opacity: 1; }
-    }
 
     /* ========================================================================
-       CSS SECTION 5 — THE READING / WATCHING AREA
-       This is the scrollable middle of the page: the YouTube video (if you add
-       one) followed by your article text.
+       CSS SECTION 5 — THE TOP BAR  (the page's name, and Video / Text)
+       ======================================================================== */
+    #top {
+      flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 52px; padding: 0 12px;
+      font-family: -apple-system, system-ui, sans-serif;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    #logo { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 18px; letter-spacing: -.3px; }
+    #logo .mark {
+      width: 26px; height: 26px; border-radius: 7px;
+      background: var(--accent); color: #fff;
+      display: grid; place-items: center; font-size: 13px;
+    }
+    body.recording #logo, body.starting #logo { visibility: hidden; }   /* the REC badge sits there */
+
+    /* "Video" and "Text": two pill buttons, the chosen one white, like
+       YouTube's topic chips. */
+    #modeSeg { display: flex; gap: 8px; }
+    #modeSeg button {
+      background: var(--chip); color: #f1f1f1;
+      padding: 7px 14px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    }
+    #modeSeg button.on { background: #f1f1f1; color: #0f0f0f; }
+
+    /* ========================================================================
+       CSS SECTION 6 — THE MIDDLE AREA (scrolls)
+       Holds either Video mode or Text mode. Only one shows at a time.
        ======================================================================== */
     #reader {
       flex: 1;                         /* take up all the space between top and bar */
-      overflow-y: auto;                /* scroll when the text is long */
+      overflow-y: auto;                /* scroll when there's a lot */
       -webkit-overflow-scrolling: touch;
-      padding: 60px 22px 24px 22px;    /* space around the edges */
       font-size: 21px;
       line-height: 1.7;                /* roomy line spacing, easy to read */
     }
+    #videoMode, #textMode { display: none; }
+    body.mode-video #videoMode { display: block; }
+    body.mode-text #textMode { display: block; }
 
-    /* The box that holds the embedded YouTube player. */
-    #videoWrap {
-      display: none;                   /* hidden until you paste a link */
-      margin: 0 0 24px;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #000;
-      aspect-ratio: 16 / 9;            /* keep the normal widescreen video shape */
-    }
-    #videoWrap.show { display: block; }
-    #videoWrap iframe { width: 100%; height: 100%; border: 0; display: block; }
-
+    /* ---- TEXT MODE: just your script ---- */
+    #textMode { padding: 24px 22px 24px; }
     #content h1 { font-size: 28px; margin: 0 0 6px; }
     #content .byline { color: var(--muted); font-size: 15px; margin-bottom: 22px; font-family: -apple-system, system-ui, sans-serif; }
     #content p { margin: 0 0 18px; }
-
     /* A tall empty space after the text so the last line can scroll up to the
        middle of the screen instead of being stuck at the bottom. */
     #endspace { height: 50vh; }
 
+    /* ---- VIDEO MODE: laid out like YouTube's watch page ----
+       The player sits at the top, edge to edge, and stays there while you
+       scroll the information and your recent videos underneath. */
+    #videoMode { font-family: -apple-system, system-ui, sans-serif; line-height: 1.35; font-size: 15px; color: #f1f1f1; }
+    #player {
+      position: sticky; top: 0; z-index: 5;
+      width: 100%; aspect-ratio: 16 / 9;
+      background: #000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #ytWrap { width: 100%; height: 100%; }
+    #ytWrap iframe { width: 100%; height: 100%; border: 0; display: block; }
+    #noVideoMsg { display: none; color: #aaa; font-size: 14px; text-align: center; padding: 0 30px; }
+    body:not(.hasVideo) #ytWrap { display: none; }
+    body:not(.hasVideo) #noVideoMsg { display: block; }
+
+    #vInfo { padding: 12px 12px 4px; }
+    body:not(.hasVideo) #vInfo { display: none; }
+    #vTitle {
+      font-size: 18px; font-weight: 700; line-height: 1.3; margin: 0 0 4px;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    #vChannel { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+    #vAvatar {
+      flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%;
+      background: #3f51b5; color: #fff; display: grid; place-items: center; font-weight: 700;
+    }
+    #vAuthor { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #vOpen {
+      flex: 0 0 auto; background: #f1f1f1; color: #0f0f0f; text-decoration: none;
+      padding: 8px 14px; border-radius: 18px; font-size: 14px; font-weight: 600;
+    }
+    /* The row of grey pill buttons (Full screen, Change video). */
+    .chipRow { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .chipRow button {
+      background: var(--chip); color: #f1f1f1; white-space: nowrap;
+      padding: 9px 14px; border-radius: 18px; font-size: 14px; font-weight: 600;
+    }
+
+    /* The box for pasting a YouTube link. Shown when there's no video yet, or
+       after you tap "Change video". */
+    #linkForm { display: none; gap: 8px; padding: 12px; }
+    body:not(.hasVideo) #linkForm, body.editingLink #linkForm { display: flex; }
+    #linkForm input { flex: 1; min-width: 0; }
+    #linkForm button { background: var(--accent); color: #fff; font-weight: 600; }
+    #linkMsg { display: none; color: #ffb4b4; font-size: 13px; padding: 0 12px 8px; }
+
+    /* "Recent videos": the links you've played before, like YouTube's list of
+       videos under the player. Tap one to play it again. */
+    #recentHead { font-size: 16px; margin: 16px 12px 8px; }
+    #recentList { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 24px; }
+    .recent {
+      display: flex; gap: 10px; align-items: flex-start; text-align: left;
+      background: none; padding: 0; color: #f1f1f1; border-radius: 0;
+    }
+    .recent img { flex: 0 0 auto; width: 168px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: #222; }
+    .recent span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .recent b {
+      font-size: 14px; font-weight: 600; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .recent small { color: #aaa; font-size: 12px; }
+
+    /* ---- FULL SCREEN, the page's own ----
+       YouTube's own full-screen button is switched off on purpose: while a
+       video is in iPhone's full screen, iPhone won't let the page switch the
+       camera on, so the Action Button couldn't start a recording. Instead the
+       page makes the player fill the screen itself, which keeps the page "on
+       screen" as far as iPhone is concerned.
+         • Phone sideways: the video fills the screen automatically.
+         • Phone upright + "⛶ Full screen": the video is turned sideways for
+           you; turn the phone to watch it. The ✕ in the corner leaves. */
+    body.theater #player {
+      position: fixed; inset: 0; z-index: 90;
+      width: auto; height: auto; aspect-ratio: auto;
+    }
+    body.theater #ytWrap { width: min(100vw, calc(100dvh * 16 / 9)); height: min(100dvh, calc(100vw * 9 / 16)); }
+    body.theater.rotated #player {
+      inset: auto; top: 0; left: 100vw;
+      width: 100dvh; height: 100vw;
+      transform-origin: 0 0; transform: rotate(90deg);   /* turn it a quarter clockwise */
+    }
+    body.theater.rotated #ytWrap { width: min(100dvh, calc(100vw * 16 / 9)); height: min(100vw, calc(100dvh * 9 / 16)); }
+    body.theater #bar, body.theater #barHandle { display: none !important; }
+    #exitTheater {
+      display: none; position: absolute; top: 10px; right: 10px; z-index: 3;
+      width: 40px; height: 40px; padding: 0; border-radius: 50%;
+      background: rgba(0,0,0,.55); color: #fff; font-size: 18px;
+    }
+    body.theater #exitTheater { display: block; }
+    body.theater:not(.rotated) #exitTheater { right: calc(env(safe-area-inset-right) + 10px); }
+    /* In full screen, the REC badge and pop-up messages move onto the video, so
+       they turn with it. */
+    #player #recBadge { position: absolute; top: 10px; left: 10px; }
+    body.theater:not(.rotated) #player #recBadge { left: calc(env(safe-area-inset-left) + 10px); }
+    body.theater.rotated #player #recBadge { left: calc(env(safe-area-inset-top) + 6px); }
+    #player #toast { position: absolute; top: 56px; }
+
     /* ========================================================================
-       CSS SECTION 6 — THE BOTTOM CONTROL BAR
-       Holds: Start/Stop, Ready, front/back camera, auto-scroll, gear.
-       (The running time shows in the ● REC badge at the top-left.)
-       You can drag it down off the screen (see "SWIPE THE CONTROL BAR AWAY" in
-       the JavaScript).
+       CSS SECTION 7 — THE BOTTOM CONTROL BAR
+       Holds: Start/Stop, your clips (🎞), front/back camera, auto-scroll (Text
+       mode only), and the gear. You can drag it down off the screen (see
+       "SWIPE THE CONTROL BAR AWAY" in the JavaScript).
        ======================================================================== */
     #bar {
       position: relative;              /* lets the little grab line sit on top of it */
@@ -263,13 +385,10 @@
 
     #recBtn { background: var(--accent); flex: 1; font-weight: 600; } /* the big blue one */
     body.recording #recBtn { background: var(--rec); }                /* turns red while filming */
-
-    /* The "Ready" button. It turns green while it's on, which means the camera
-       stays switched on between recordings so the Action Button can start
-       recording instantly. */
-    #readyBtn.on { background: #15803d; color: #fff; }
     .iconbtn { padding: 13px 13px; }
     #bar button { white-space: nowrap; }            /* labels never break onto two lines */
+    #clipsBtn.waiting { background: #3a2f12; color: #ffe2a8; }  /* clips waiting to be saved */
+    body.mode-video #scrollBtn { display: none; }   /* auto-scroll is for Text mode */
     /* On very narrow phones, squeeze the bar's spacing a little so everything fits. */
     @media (max-width: 360px) {
       #bar { gap: 5px; padding-left: 8px; padding-right: 8px; }
@@ -277,8 +396,8 @@
     }
 
     /* ========================================================================
-       CSS SECTION 7 — THE SETTINGS POP-UP ("sheet")
-       Slides up from the bottom. Holds the YouTube link box and your script.
+       CSS SECTION 8 — THE SETTINGS POP-UP ("sheet")
+       Slides up from the bottom. Holds the zoom, your script, and sizes.
        ======================================================================== */
     #sheet {
       position: fixed; inset: 0;        /* cover the whole screen */
@@ -302,7 +421,8 @@
       width: 100%;
       background: var(--bg); color: var(--ink);
       border: 1px solid var(--line); border-radius: 12px;
-      padding: 12px; font: inherit; font-size: 15px;
+      padding: 12px; font: inherit; font-size: 16px;   /* 16px stops iPhone zooming in */
+      font-family: -apple-system, system-ui, sans-serif;
     }
     textarea { min-height: 150px; resize: vertical; }
 
@@ -314,52 +434,65 @@
     /* The Action Button part of Settings, set apart with a line above it. */
     #actionSection { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
 
-    /* ========================================================================
-       CSS SECTION 8 — THE "SAVED" SCREEN
-       Appears after you stop recording. It lists EVERY clip you've recorded
-       since opening the page, each with its own Save button, so starting and
-       stopping a few times with the Action Button never loses a clip.
-       ======================================================================== */
-    #saved {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.92);
-      display: none; z-index: 120;
-      overflow-y: auto;                  /* scroll if there are lots of clips */
-      padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px);
-      font-family: -apple-system, system-ui, sans-serif;
-    }
-    #saved.open { display: flex; }
-    #savedInner {
-      margin: auto;                      /* centred, but still scrollable when tall */
-      width: 100%; max-width: 360px;
-      display: flex; flex-direction: column; align-items: center;
-      gap: 14px; text-align: center;
-    }
-    #saved video { max-width: 100%; max-height: 40vh; border-radius: 12px; background:#000; }
-    #saved p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0; }
-    #clipList { width: 100%; display: flex; flex-direction: column; gap: 14px; }
-    /* One row per clip: a big "Save to Photos" button, and a small
-       "Save to Files" link under it as a backup. */
-    .clipRow { display: flex; flex-direction: column; gap: 6px; }
-    .photosBtn {
-      width: 100%; background: var(--accent); color: #fff;
-      font-weight: 600; padding: 14px 22px; border-radius: 12px;
-    }
-    .photosBtn.done { background: #15803d; }        /* turns green once it's been sent */
-    .photosBtn.busy { opacity: .6; }                 /* "Opening the save menu…" */
-    /* A message about saving, shown on the saved screen when needed. */
-    #saveMsg {
-      display: none; width: 100%;
-      background: #3a2a10; color: #ffe2a8; border: 1px solid #5a4318;
-      border-radius: 12px; padding: 10px 12px; font-size: 14px; line-height: 1.4;
-    }
-    .filesLink { color: var(--muted); font-size: 13px; }
-
     /* The 0.5× / 1× / 2× zoom choice in Settings: three buttons side by side,
        the chosen one highlighted. */
     .seg { display: flex; gap: 8px; margin: 4px 0 6px; }
     .seg button { flex: 1; font-weight: 600; }
     .seg button.on { background: var(--accent); color: #fff; }
+
+    /* ========================================================================
+       CSS SECTION 9 — YOUR CLIPS (opened with the 🎞 button)
+       Every clip is kept on this phone until you save it. Nothing pops up
+       after a recording: you come here when you're done.
+       ======================================================================== */
+    #clipsScreen {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.94);
+      display: none; z-index: 120;
+      overflow-y: auto;                  /* scroll if there are lots of clips */
+      padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px);
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+    #clipsScreen.open { display: flex; }
+    #clipsInner {
+      margin: auto;                      /* centred, but still scrollable when tall */
+      width: 100%; max-width: 380px;
+      display: flex; flex-direction: column;
+      gap: 12px;
+    }
+    #clipsInner h2 { margin: 0; font-size: 22px; }
+    #clipsInner p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0; }
+    #saveAllBtn {
+      width: 100%; background: var(--accent); color: #fff;
+      font-weight: 700; font-size: 17px; padding: 16px 22px; border-radius: 14px;
+    }
+    #saveAllBtn.done { background: #15803d; opacity: 1; }   /* everything saved */
+    #saveAllBtn.busy { opacity: .6; }                        /* "Opening the save menu…" */
+    /* A message about saving, shown on this screen when needed. */
+    #saveMsg {
+      display: none;
+      background: #3a2a10; color: #ffe2a8; border: 1px solid #5a4318;
+      border-radius: 12px; padding: 10px 12px; font-size: 14px; line-height: 1.4;
+    }
+    #keepNote {
+      display: none;
+      background: #3a1a1a; color: #ffd7d7; border: 1px solid #5a2a2a;
+      border-radius: 12px; padding: 10px 12px; font-size: 14px; line-height: 1.4;
+    }
+    #clipList { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+    /* One row per clip: its details, then small Photos / Files / ✕ buttons. */
+    .clipRow {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      padding: 10px 10px 10px 12px;
+    }
+    .clipInfo { flex: 1; min-width: 0; font-size: 14px; line-height: 1.35; }
+    .clipInfo small { display: block; color: var(--muted); font-size: 12px; }
+    .clipInfo .ok { color: #4ade80; font-weight: 600; }
+    .clipRow button, .clipRow a { flex: 0 0 auto; font-size: 13px; padding: 8px 10px; border-radius: 10px; }
+    .clipRow a { color: var(--muted); }
+    .clipRow .delBtn { background: none; color: var(--muted); padding: 8px 6px; }
+    #clearSaved { background: #262a33; }
 
     /* A small red error strip, shown only if something goes wrong. */
     #err {
@@ -367,7 +500,7 @@
       background: #3a1a1a; color: #ffd7d7;
       border: 1px solid #5a2a2a; border-radius: 12px;
       padding: 12px 14px; font-family: -apple-system, system-ui, sans-serif;
-      font-size: 14px; display: none; z-index: 125;   /* above the saved screen */
+      font-size: 14px; display: none; z-index: 125;   /* above the clips screen */
     }
   </style>
 </head>
@@ -383,45 +516,90 @@
 
   <!-- ==========================================================================
        HTML SECTION B — THE SMALL "RECORDING" BADGE
-       This is your always-visible proof that filming is on. JavaScript only makes
-       it appear while recording, and updates the time inside it.
+       Your always-visible proof that filming is on. JavaScript only makes it
+       appear while recording, and updates the time inside it.
        ========================================================================== -->
   <div id="recBadge"><span class="dot"></span><span id="badgeTime">REC 0:00</span></div>
 
   <!-- ==========================================================================
-       HTML SECTION C — THE READING / WATCHING AREA
-       #videoWrap holds the YouTube player. #content holds your article text.
+       HTML SECTION C — THE TOP BAR: the page's name, and the Video / Text choice
+       ========================================================================== -->
+  <header id="top">
+    <div id="logo"><span class="mark">▶</span>Reader</div>
+    <div id="modeSeg">
+      <button data-mode="video">Video</button>
+      <button data-mode="text">Text</button>
+    </div>
+  </header>
+
+  <!-- ==========================================================================
+       HTML SECTION D — THE MIDDLE AREA: Video mode and Text mode
        ========================================================================== -->
   <div id="reader">
-    <div id="videoWrap"><!-- the YouTube <iframe> is inserted here by JavaScript --></div>
-    <div id="content"><!-- your article text is inserted here by JavaScript --></div>
-    <div id="endspace"></div>
+
+    <!-- VIDEO MODE: a YouTube-style page for the link you paste. -->
+    <section id="videoMode">
+      <div id="player">
+        <div id="ytWrap"><div id="ytHolder"><!-- the YouTube player goes here --></div></div>
+        <div id="noVideoMsg">Paste a YouTube link below to watch it here.</div>
+        <button id="exitTheater" aria-label="Leave full screen">✕</button>
+      </div>
+
+      <!-- The video's title and channel, then the grey pill buttons. -->
+      <div id="vInfo">
+        <h1 id="vTitle"></h1>
+        <div id="vChannel">
+          <span id="vAvatar"></span>
+          <span id="vAuthor"></span>
+          <a id="vOpen" target="_blank" rel="noopener">Open in YouTube</a>
+        </div>
+        <div class="chipRow">
+          <button id="fullBtn">⛶ Full screen</button>
+          <button id="changeBtn">🔗 Change video</button>
+        </div>
+      </div>
+
+      <!-- Paste a YouTube link here. -->
+      <form id="linkForm">
+        <input type="text" id="linkBox" placeholder="Paste a YouTube link" autocomplete="off" autocapitalize="off" />
+        <button type="submit">Play</button>
+      </form>
+      <div id="linkMsg"></div>
+
+      <h2 id="recentHead">Recent videos</h2>
+      <div id="recentList"><!-- filled in by JavaScript --></div>
+    </section>
+
+    <!-- TEXT MODE: just your script. -->
+    <section id="textMode">
+      <div id="content"><!-- your article text is inserted here by JavaScript --></div>
+      <div id="endspace"></div>
+    </section>
   </div>
 
   <!-- ==========================================================================
-       HTML SECTION D — THE CONTROL BAR  (buttons along the bottom)
+       HTML SECTION E — THE CONTROL BAR  (buttons along the bottom)
        Each button has an id so JavaScript can "listen" for taps on it.
        ========================================================================== -->
   <div id="bar">
     <!-- ***** THE RECORD BUTTON (the main control) *****
-         Tapping it starts recording; tapping again stops. JavaScript decides
-         which, based on whether we're currently recording. -->
+         Start switches the camera + microphone on and records. Stop ends the
+         clip and switches them off again. The Action Button does the same. -->
     <button id="recBtn">● Start</button>
 
-    <!-- "Ready" switches the camera on and keeps it on between recordings, so
-         the iPhone Action Button can start recording instantly, even while the
-         YouTube video is full screen. Green = on. Tap again to switch it off. -->
-    <button class="iconbtn" id="readyBtn" title="Keep the camera on for the Action Button">Ready</button>
+    <!-- Your clips. The number is how many are waiting to be saved to Photos.
+         Hidden until you've recorded something. -->
+    <button class="iconbtn" id="clipsBtn" title="Your clips" style="display:none">🎞 <span id="clipCount">0</span></button>
 
     <!-- Choose the front (selfie) or back (whiteboard) camera. With no camera
          picture on screen, the label is how you know which one is picked:
          it reads "⇄ Front" or "⇄ Back". -->
     <button class="iconbtn" id="flipBtn" title="Front or back camera">⇄ Front</button>
 
-    <!-- Slowly scroll the text upward so you can read hands-free. -->
+    <!-- Slowly scroll the text upward so you can read hands-free (Text mode). -->
     <button class="iconbtn" id="scrollBtn" title="Auto-scroll">⤓</button>
 
-    <!-- Open the settings pop-up (YouTube link, script, sizes). -->
+    <!-- Open the settings pop-up (zoom, script, sizes, Action Button). -->
     <button class="iconbtn" id="gearBtn" title="Settings">⚙</button>
   </div>
 
@@ -429,24 +607,20 @@
   <button id="barHandle">▲ Controls</button>
 
   <!-- ==========================================================================
-       HTML SECTION E — THE SETTINGS POP-UP
+       HTML SECTION F — THE SETTINGS POP-UP
        ========================================================================== -->
   <div id="sheet">
     <div id="sheetInner">
       <h2>Camera zoom</h2>
-      <p>Same as the Camera app: 0.5× is the extra-wide view (back camera only). Changes straight away. The top-left badge shows the camera and zoom in use.</p>
+      <p>Same as the Camera app: 0.5× is the extra-wide view (back camera only). Used from your next recording. The REC badge shows the camera and zoom in use.</p>
       <div class="seg" id="zoomSeg">
         <button data-z="0.5">0.5×</button>
         <button data-z="1">1×</button>
         <button data-z="2">2×</button>
       </div>
 
-      <h2>YouTube video</h2>
-      <p>Paste a YouTube link to play it on this page. Leave blank for none.</p>
-      <input type="text" id="ytBox" placeholder="https://www.youtube.com/watch?v=…" />
-
-      <h2>Your script</h2>
-      <p>Paste the text you want to read. It's saved on this phone only.</p>
+      <h2>Your script (Text mode)</h2>
+      <p>Paste the text you want to read. It's saved on this phone only. (The YouTube link is set in Video mode: tap “Change video”.)</p>
       <textarea id="scriptBox" placeholder="Paste your article here…"></textarea>
 
       <div class="row">
@@ -466,15 +640,17 @@
       <div id="actionSection">
         <h2>Action Button</h2>
         <p id="remoteStatus">Checking…</p>
-        <p><b>How it works:</b> pressing and holding the Action Button does
-          exactly what tapping <b>Start</b> / <b>Stop</b> does. Start turns
-          red and says <b>■ Stop</b>, and the top-left badge shows
-          <b>● REC</b>. About two seconds later a banner at the top of the
-          screen confirms it.</p>
-        <p><b>Ready is optional.</b> It switches the camera on early but does
-          NOT record (the badge says e.g. “Back 1× · not recording”). Tap it before
-          going full screen so the first press starts instantly.</p>
-        <p>Works on any Wi-Fi or on mobile data. Your Mac isn't needed.</p>
+        <p><b>Press once:</b> the camera and microphone switch on and recording
+          starts (the top-left badge shows <b>● REC</b>). <b>Press again:</b>
+          recording stops and the camera and microphone switch off. A banner
+          confirms each press about two seconds later.</p>
+        <p><b>Keep this page on screen.</b> iPhone only lets a page switch the
+          camera on while you can see it. In Video mode, use the page's own
+          <b>⛶ Full screen</b> (or turn the phone sideways), not YouTube's.</p>
+        <p><b>Saving:</b> clips wait under <b>🎞</b> in the bar. When you're
+          done, tap 🎞 → <b>Save all to Photos</b>.</p>
+        <p><b>Tip:</b> in Safari tap <b>aA → Website Settings</b> and set Camera
+          and Microphone to <b>Allow</b>, so iPhone never stops to ask.</p>
         <p><b>One-time setup:</b> open your setup link on this phone once, add
           the <b>Record</b> shortcut, then in iPhone <b>Settings → Action
           Button</b> choose <b>Shortcut → Record</b>.</p>
@@ -483,16 +659,21 @@
   </div>
 
   <!-- ==========================================================================
-       HTML SECTION F — THE SAVED SCREEN
-       Lists every clip from this visit. #clipList gets one Save button per clip.
+       HTML SECTION G — YOUR CLIPS (the 🎞 button opens this)
        ========================================================================== -->
-  <div id="saved">
-    <div id="savedInner">
-      <video id="savedVideo" controls playsinline></video>
-      <div id="clipList"><!-- the Save buttons are inserted here by JavaScript --></div>
+  <div id="clipsScreen">
+    <div id="clipsInner">
+      <h2>Your clips</h2>
+      <button id="saveAllBtn">Save all to Photos</button>
+      <p id="saveAllHelp"></p>
       <div id="saveMsg"></div>
-      <p id="saveHelp"></p>
-      <button id="closeSaved" style="background:#262a33">Back</button>
+      <div id="keepNote">This tab can’t keep clips once the page closes (it may be a <b>Private</b> tab). Save them before closing it, and use a normal Safari tab next time.</div>
+      <div id="clipList"><!-- one row per clip, filled in by JavaScript --></div>
+      <button id="clearSaved">Remove saved clips from this page</button>
+      <p>Clips are kept on this phone (inside Safari, for this page) until you
+        save them, even if the page reloads. Clips already saved to Photos
+        are removed from here after 3 days.</p>
+      <button id="closeClips" style="background:#262a33">Back</button>
     </div>
   </div>
 
@@ -509,43 +690,47 @@
    JAVASCRIPT — this is where all the ACTIONS happen.
    Below, in order:
      1. Grab references to the HTML boxes/buttons.
-     2. Load your saved YouTube link, script, and settings.
-     3. The camera (open it, flip it, keep it "Ready").
-     4. The recording (start, stop, save).
-     5. The timer, screen-wake, auto-scroll, and swiping the bar away.
-     6. Connect every button to the thing it should do.
-     7. The Action Button (listening to your Mac for start/stop).
+     2. Text mode: your script.
+     3. Video mode: the YouTube player, recent videos, and full screen.
+     4. Switching between Video mode and Text mode.
+     5. The camera (and its zoom).
+     6. The recording (start, stop).
+     7. Your clips: kept on the phone, then saved to Photos.
+     8. The timer, screen-wake, auto-scroll, and swiping the bar away.
+     9. The Action Button (start/stop from anywhere).
+    10. Connect every button to the thing it should do, and get going.
    ============================================================================ */
 
 /* ---- 1. GRAB THE HTML ELEMENTS ----
    document.getElementById('x') finds the box whose id is "x" so we can control
    it from code. We store each in a const (a named value that won't change). */
-const preview   = document.getElementById('preview');    // the invisible camera box
-const recBtn    = document.getElementById('recBtn');      // the Start/Stop button
-const readyBtn  = document.getElementById('readyBtn');    // the "Ready" (camera stays on) button
-const badgeTime = document.getElementById('badgeTime');   // the clock in the REC badge
-const flipBtn   = document.getElementById('flipBtn');     // front/back camera button
-const scrollBtn = document.getElementById('scrollBtn');   // auto-scroll button
-const gearBtn   = document.getElementById('gearBtn');     // settings button
-const bar       = document.getElementById('bar');         // the whole bottom control bar
-const barHandle = document.getElementById('barHandle');   // the "▲ Controls" tab
-const sheet     = document.getElementById('sheet');       // the settings pop-up
-const scriptBox = document.getElementById('scriptBox');   // the text box for your script
-const ytBox     = document.getElementById('ytBox');       // the text box for the YouTube link
-const reader    = document.getElementById('reader');      // the scrolling reading area
-const content   = document.getElementById('content');     // where the article text goes
-const videoWrap = document.getElementById('videoWrap');   // where the YouTube player goes
-const errBox    = document.getElementById('err');         // the red error strip
+const $ = id => document.getElementById(id);
+const preview   = $('preview');     // the invisible camera box
+const recBadge  = $('recBadge');    // the ● REC badge
+const badgeTime = $('badgeTime');   // the words inside the badge
+const recBtn    = $('recBtn');      // the Start/Stop button
+const clipsBtn  = $('clipsBtn');    // the 🎞 button
+const flipBtn   = $('flipBtn');     // front/back camera button
+const scrollBtn = $('scrollBtn');   // auto-scroll button
+const gearBtn   = $('gearBtn');     // settings button
+const bar       = $('bar');         // the whole bottom control bar
+const barHandle = $('barHandle');   // the "▲ Controls" tab
+const sheet     = $('sheet');       // the settings pop-up
+const scriptBox = $('scriptBox');   // the text box for your script
+const reader    = $('reader');      // the scrolling middle area
+const content   = $('content');     // where the article text goes
+const player    = $('player');      // the YouTube player's box
+const toastEl   = $('toast');       // the pop-up message
+const errBox    = $('err');         // the red error strip
+const clipsScreen = $('clipsScreen');
 
 /* ---- VARIABLES THAT CHANGE WHILE THE APP RUNS ----
    "let" means this value WILL change later (unlike "const"). */
-let stream = null;          // the live camera+mic feed
+let stream = null;          // the live camera+mic feed (only while recording)
 let recorder = null;        // the object that writes the feed to a file
 let recording = false;      // true while we're filming
-let starting = false;       // true for the moment between "start" and actually filming
-let ready = false;          // true while "Ready" is on (camera kept on between recordings)
-let takes = 0;              // how many clips you've recorded since opening the page
-const clips = [];           // the finished clips, waiting for you to save them
+let starting = false;       // true while the camera is switching on
+let takes = 0;              // the number of the last clip
 // Which camera: 'user' = front/selfie, 'environment' = back. Your last choice is
 // remembered on this phone, since there's no picture on screen to remind you.
 let facing = localStorage.getItem('facing') === 'environment' ? 'environment' : 'user';
@@ -554,19 +739,18 @@ let startTime = 0;          // when the current recording began
 let timerId = null;         // the repeating clock
 const BLOCKED = 'Camera/mic was blocked. In Safari tap “aA” → Website Settings → allow Camera & Microphone, then reload.';
 
-/* ---- A DEFAULT ARTICLE ----
-   Shown until you paste your own text in Settings. The `backticks` let the text
-   span multiple lines. It's written in HTML so headings/paragraphs show nicely. */
+// Makes text safe to put on the page (so a video title can't break it).
+function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+/* ---- 2. TEXT MODE: YOUR SCRIPT ----
+   localStorage is a tiny notepad the browser keeps on THIS phone. We use it to
+   remember your script, link, and sizes between visits. */
 const DEFAULT_TEXT = `<h1>Understanding Compound Interest</h1>
 <div class="byline">A short primer · add your own text in Settings ⚙</div>
 <p>Compound interest is often called the eighth wonder of the world. You earn returns not only on the money you first put in, but also on the returns that money has already earned.</p>
 <p>Invest one thousand dollars at eight percent a year. After year one you have one thousand and eighty. In year two you earn eight percent on the full one thousand and eighty, and the growth quietly speeds up.</p>
 <p>Over thirty years that same thousand grows past ten thousand — you added nothing more; time did the work. This is why starting early beats starting big.</p>
 <p>Replace this with your own script: tap the gear icon, paste your text, press Save.</p>`;
-
-/* ---- 2. LOAD SAVED STUFF ----
-   localStorage is a tiny notepad the browser keeps on THIS phone. We use it to
-   remember your script, link, and sizes between visits. */
 
 // Put the article text on the page (your saved text, or the default sample).
 function loadScript() {
@@ -586,47 +770,196 @@ function toParagraphs(t){
   return t.split(/\n\s*\n/).map(p => '<p>' + p.replace(/\n/g,' ').trim() + '</p>').join('');
 }
 
+// Apply the saved text size, if any.
+const savedSize = localStorage.getItem('fontSize');
+if (savedSize) { reader.style.fontSize = savedSize + 'px'; $('fontSize').value = savedSize; }
+
+/* ---- 3. VIDEO MODE ----
+   The player is YouTube's own, from youtube-nocookie.com (YouTube's privacy
+   address). We load it through YouTube's "player code", which lets this page
+   pause it, and nudge it to keep playing if iPhone pauses it when the
+   microphone switches on. If that code can't load, a plain player is used. */
+
 // Pull the YouTube video id out of almost any YouTube link you paste.
 function youtubeId(url) {
   if (!url) return '';
   // These patterns cover the common link shapes: youtu.be/ID, watch?v=ID,
-  // /embed/ID, and /shorts/ID.
-  const m = url.match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/)([A-Za-z0-9_-]{11})/);
+  // /embed/ID, /shorts/ID and /live/ID.
+  const m = url.match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : '';
 }
+function currentVideoId() { return youtubeId(localStorage.getItem('yt') || ''); }
 
-// Show (or clear) the embedded YouTube player based on the saved link.
-function loadVideo() {
-  const id = youtubeId(localStorage.getItem('yt') || '');
-  if (id) {
-    // Build the player. "playsinline=1" makes it play ON the page on iPhone
-    // instead of jumping to full screen. youtube-nocookie is the privacy host.
-    videoWrap.innerHTML =
-      '<iframe src="https://www.youtube-nocookie.com/embed/' + id + '?playsinline=1&rel=0" ' +
-      'allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share" ' +
-      'allowfullscreen></iframe>';
-    videoWrap.classList.add('show');
-    ytBox.value = localStorage.getItem('yt');
-  } else {
-    videoWrap.innerHTML = '';
-    videoWrap.classList.remove('show');
-  }
+let ytPlayer = null;        // the YouTube player, once it exists
+let ytLoading = false;      // true while YouTube's player code is downloading
+let playerVideoId = '';     // which video the player is showing
+let ytApi = null;           // "YouTube's player code has loaded" (a promise)
+
+function loadYouTubeApi() {
+  if (!ytApi) ytApi = new Promise((ok, fail) => {
+    window.onYouTubeIframeAPIReady = () => ok(window.YT);
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    s.onerror = fail;
+    document.head.appendChild(s);
+    setTimeout(() => fail(new Error('slow')), 8000);  // give up after 8 seconds
+  });
+  return ytApi;
 }
 
-// Apply the saved text size, if any.
-const savedSize = localStorage.getItem('fontSize');
-if (savedSize) { reader.style.fontSize = savedSize + 'px'; document.getElementById('fontSize').value = savedSize; }
+// Show a video in the player (without starting it: you tap play).
+function showVideo(id) {
+  if (playerVideoId === id) return;                   // already showing it
+  playerVideoId = id;
+  if (ytPlayer) { ytPlayer.cueVideoById ? ytPlayer.cueVideoById(id) : plainPlayer(id); return; }
+  if (ytLoading) return;                              // on its way; it'll use playerVideoId
+  ytLoading = true;
+  loadYouTubeApi().then(YT => {
+    ytPlayer = new YT.Player('ytHolder', {
+      videoId: playerVideoId,
+      host: 'https://www.youtube-nocookie.com',
+      // playsinline: play on the page, not in iPhone's full screen.
+      // fs: 0 hides YouTube's full-screen button (see "FULL SCREEN" in the CSS).
+      // rel: 0 keeps suggestions to the same channel.
+      playerVars: { playsinline: 1, fs: 0, rel: 0 }
+    });
+  }).catch(() => {
+    ytPlayer = { plain: true };
+    plainPlayer(playerVideoId);
+  });
+}
+// The fallback: a plain YouTube player.
+function plainPlayer(id) {
+  $('ytWrap').innerHTML = id ? '<iframe src="https://www.youtube-nocookie.com/embed/' + id +
+    '?playsinline=1&rel=0&fs=0" allow="encrypted-media; picture-in-picture"></iframe>' : '';
+}
+// Pause the video (used when you switch to Text mode).
+function pauseVideo() {
+  if (ytPlayer && ytPlayer.pauseVideo) { try { ytPlayer.pauseVideo(); } catch (e) {} }
+  else if (ytPlayer && ytPlayer.plain) { plainPlayer(''); playerVideoId = ''; }
+}
 
-loadScript();   // draw the text now
-loadVideo();    // draw the video now
+// Starting or stopping the microphone can make iPhone pause the video. If the
+// video was playing just before, nudge it to carry on.
+let videoWasPlaying = false;
+function noteVideo() {
+  try { videoWasPlaying = !!(ytPlayer && ytPlayer.getPlayerState && ytPlayer.getPlayerState() === 1); }
+  catch (e) { videoWasPlaying = false; }
+}
+function keepVideoPlaying() {
+  if (!videoWasPlaying) return;
+  [400, 1200, 2500].forEach(ms => setTimeout(() => {
+    try { if (ytPlayer.getPlayerState() === 2) ytPlayer.playVideo(); } catch (e) {}
+  }, ms));
+}
 
-/* ---- 3. THE CAMERA ----
+// Show (or clear) the video from the saved link.
+function loadVideo() {
+  const id = currentVideoId();
+  document.body.classList.toggle('hasVideo', !!id);
+  if (id && mode === 'video') showVideo(id);
+  if (id) showInfo(id);
+  showRecent();
+  updateTheater();
+}
+
+// The title and channel under the player. YouTube tells us these (its
+// "oEmbed" lookup); until it answers, we show what we remember.
+async function showInfo(id) {
+  const known = recentVideos().find(v => v.id === id) || {};
+  drawInfo(id, known);
+  const fresh = await videoInfo(id);
+  if (currentVideoId() !== id) return;                // you've switched video since
+  if (fresh.title) { drawInfo(id, fresh); remember(id, fresh); }
+}
+function drawInfo(id, info) {
+  $('vTitle').textContent = info.title || 'YouTube video';
+  $('vAuthor').textContent = info.author || 'YouTube';
+  $('vAvatar').textContent = (info.author || 'Y').trim().charAt(0).toUpperCase();
+  $('vOpen').href = 'https://www.youtube.com/watch?v=' + id;
+}
+async function videoInfo(id) {
+  try {
+    const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id));
+    if (!r.ok) return {};
+    const j = await r.json();
+    return { title: j.title || '', author: j.author_name || '' };
+  } catch (e) { return {}; }
+}
+
+// "Recent videos": every link you've played, newest first (up to 15).
+function recentVideos() { try { return JSON.parse(localStorage.getItem('ytHistory')) || []; } catch (e) { return []; } }
+function remember(id, info) {
+  const list = recentVideos();
+  const old = list.find(v => v.id === id) || {};
+  const rest = list.filter(v => v.id !== id);
+  rest.unshift({ id, title: info.title || old.title || '', author: info.author || old.author || '' });
+  localStorage.setItem('ytHistory', JSON.stringify(rest.slice(0, 15)));
+  showRecent();
+}
+function showRecent() {
+  const list = recentVideos().filter(v => v.id !== currentVideoId());
+  $('recentHead').style.display = list.length ? '' : 'none';
+  $('recentList').innerHTML = list.map(v => `
+    <button class="recent" data-id="${v.id}">
+      <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="" loading="lazy">
+      <span><b>${esc(v.title || 'YouTube video')}</b><small>${esc(v.author || 'YouTube')}</small></span>
+    </button>`).join('');
+}
+
+// Play a video: from the link box, or from Recent videos.
+function playVideo(id) {
+  localStorage.setItem('yt', 'https://www.youtube.com/watch?v=' + id);
+  remember(id, {});
+  document.body.classList.remove('editingLink');
+  $('linkBox').value = '';
+  $('linkMsg').style.display = 'none';
+  loadVideo();
+  reader.scrollTop = 0;
+}
+
+/* FULL SCREEN (the page's own, see the CSS for why).
+   It's on when you tap "⛶ Full screen", or automatically while the phone is
+   sideways in Video mode. Tap ✕ to leave. */
+let theaterByButton = false;   // you tapped "⛶ Full screen"
+let theaterDismissed = false;  // you tapped ✕ while the phone was sideways
+const sideways = matchMedia('(orientation: landscape)');
+function updateTheater() {
+  const can = mode === 'video' && !!currentVideoId();
+  const on = can && (theaterByButton || (sideways.matches && !theaterDismissed));
+  document.body.classList.toggle('theater', on);
+  document.body.classList.toggle('rotated', on && !sideways.matches);
+  // In full screen the REC badge and messages move onto the video, so they
+  // turn with it. Afterwards they go back to their usual place.
+  const home = on ? player : document.body;
+  [recBadge, toastEl].forEach(el => { if (el.parentNode !== home) home.appendChild(el); });
+}
+// Turning the phone starts fresh: sideways = full screen, upright = normal.
+sideways.addEventListener('change', () => { theaterByButton = false; theaterDismissed = false; updateTheater(); });
+
+/* ---- 4. VIDEO MODE OR TEXT MODE ----
+   Remembered on this phone. Text mode pauses the video. */
+let mode = localStorage.getItem('mode') || (currentVideoId() ? 'video' : 'text');
+function setMode(m) {
+  mode = m === 'text' ? 'text' : 'video';
+  localStorage.setItem('mode', mode);
+  document.body.classList.toggle('mode-video', mode === 'video');
+  document.body.classList.toggle('mode-text', mode === 'text');
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  if (mode === 'text') { pauseVideo(); theaterByButton = false; }
+  else stopAutoScroll();
+  reader.scrollTop = 0;
+  loadVideo();
+}
+
+/* ---- 5. THE CAMERA ----
 
    openCamera() turns the camera on using whichever side ('facing') is selected,
-   and plugs it into the invisible camera box. It runs when you press Start, or
-   when you tap Ready. Otherwise the camera stays off. */
+   and plugs it into the invisible camera box. It only runs when a recording
+   starts, and closeCamera() runs as soon as it stops, so the camera and
+   microphone are never on in between (that's what drains the battery). */
 async function openCamera() {
-  // If a camera was already on, switch it off first so we can reopen the other side.
+  // If a camera was already on, switch it off first.
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
   // Ask for a side ("facingMode"), never for a particular lens. On an iPhone
@@ -640,13 +973,14 @@ async function openCamera() {
   return stream;
 }
 
-// Ask the browser for a camera + the microphone. This is the moment iPhone
-// shows its "Allow camera & microphone?" prompt (only the first time).
+// Ask the browser for a camera + the microphone. The first time, iPhone asks
+// "Allow camera & microphone?" (set them to Allow in Safari's Website Settings
+// and it never asks again).
 async function askForCamera(video) {
   const ask = navigator.mediaDevices.getUserMedia({ video, audio: true });
-  // Don't wait forever. If iPhone is stuck on a question you can't see (like
-  // "Allow camera?" hidden behind a full-screen video), give up after 10
-  // seconds so the next press can try again.
+  // Don't wait forever. iPhone holds the camera back while this page isn't on
+  // screen (another app, or a video in iPhone's own full screen). Give up
+  // after 10 seconds so the next press can try again.
   let timer;
   const tooSlow = new Promise((_, fail) => { timer = setTimeout(() => fail(new Error('timeout')), 10000); });
   try {
@@ -667,11 +1001,10 @@ async function askForCamera(video) {
      • 0.5 = the ultra-wide lens
      • 1   = the main lens
      • 2   = 2× zoom
-   iPhone changes lens by itself as the zoom changes. So picking a zoom is one
-   setting on the camera that's already on. Nothing gets switched off and on.
-   The front camera normally can't go below 1×. If a choice isn't possible,
-   the page uses what it can and says so. "zoomNow" is the zoom the camera
-   really has (read back from the camera, not assumed). */
+   iPhone changes lens by itself as the zoom changes. The front camera
+   normally can't go below 1×. If a choice isn't possible, the page uses what
+   it can and says so. "zoomNow" is the zoom the camera really has (read back
+   from the camera, not assumed). */
 let zoomChoice = [0.5, 1, 2].includes(+localStorage.getItem('zoom')) ? +localStorage.getItem('zoom') : 1;
 let zoomNow = 1;
 
@@ -693,7 +1026,6 @@ async function applyZoom() {
       : zoomChoice + '× zoom isn’t available on this camera. Using ' + zoomNow + '×.');
   }
   showZoom();
-  showBadge();   // so the badge always shows the zoom the camera is really using
 }
 
 // The camera's own zoom number, rounded to the nearest of 0.5 / 1 / 2.
@@ -701,16 +1033,12 @@ function nearestZoom(z) {
   return [0.5, 1, 2].reduce((best, n) => Math.abs(n - z) < Math.abs(best - z) ? n : best, 1);
 }
 
-// Pick a zoom in Settings. If the camera is on (Ready), it changes straight away.
-async function setZoom(z) {
-  if (recording) { toast('Stop recording first, then change the zoom.'); return; }
+// Pick a zoom in Settings. It's used from the next recording.
+function setZoom(z) {
+  if (recording || starting) { toast('Stop recording first, then change the zoom.'); return; }
   zoomChoice = z;
   localStorage.setItem('zoom', String(z));
   showZoom();
-  if (cameraLive()) {
-    await applyZoom();
-    log('zoom changed: ' + cameraReport());
-  }
 }
 
 // Highlight the chosen zoom button in Settings.
@@ -745,12 +1073,11 @@ function cameraReport() {
 // The sentence to show when the camera wouldn't switch on.
 function cameraProblem(e) {
   return (e && e.message === 'timeout')
-    ? "The camera didn't start. Leave full screen, tap Ready, and allow the camera if iPhone asks."
+    ? "The camera didn't start. Keep this page on screen, and allow the camera if iPhone asks."
     : BLOCKED;
 }
 
-// Is the camera switched on and working right now? (iPhone switches it off by
-// itself if you leave Safari, so we check rather than assume.)
+// Is the camera switched on and working right now?
 function cameraLive() {
   return !!stream && stream.getVideoTracks().some(t => t.readyState === 'live');
 }
@@ -763,64 +1090,17 @@ function closeCamera() {
 }
 
 // Switch between front and back. Disabled while recording to keep the file
-// clean. If "Ready" has the camera on, it moves over to the other side straight
-// away. Otherwise only the choice changes, and the camera turns on at Start. (If a
-// phone only has one camera, it just uses that one.)
-async function flip() {
-  if (recording) return;                              // safety: don't flip mid-record
+// clean. It just changes the choice; the camera turns on at Start.
+function flip() {
+  if (recording || starting) return;                 // safety: don't flip mid-record
   facing = (facing === 'user') ? 'environment' : 'user';
   localStorage.setItem('facing', facing);             // remember it for next time
   showFacing();
-  if (cameraLive()) {
-    try { await openCamera(); }
-    catch (e) { showErr('Could not switch camera on this device.'); }
-  }
 }
 // Write "⇄ Front" or "⇄ Back" on the button.
 function showFacing() { flipBtn.textContent = facing === 'user' ? '⇄ Front' : '⇄ Back'; }
-showFacing();   // label the button correctly as soon as the page opens
 
-/* "READY" (optional): switches the camera on early, WITHOUT recording.
-   Ready does not record anything. Recording starts only when you tap Start or
-   press the Action Button (the two do exactly the same thing). Ready simply
-   gets the camera going beforehand, so a press starts recording instantly.
-   It's also the safe way to answer iPhone's "Allow camera?" question before
-   the video goes full screen. While Ready is on and you're not recording, the
-   top-left badge says e.g. "Back 1× · not recording". Tap Ready again to switch
-   the camera off. */
-async function toggleReady() {
-  if (ready) {
-    ready = false;
-    if (!recording) { closeCamera(); releaseWake(); } // if filming, it switches off when you stop
-  } else {
-    showErr('');
-    readyBtn.disabled = true;                         // no double-taps while the camera starts
-    try {
-      if (!cameraLive()) await openCamera();
-      ready = true;
-      requestWake();                                  // keep the screen awake while ready
-    } catch (e) {
-      showErr(cameraProblem(e));
-    }
-    readyBtn.disabled = false;
-  }
-  showReady();
-}
-// Green "✓ Ready" when on, plain "Ready" when off. Also updates the badge.
-function showReady() {
-  readyBtn.classList.toggle('on', ready);
-  readyBtn.textContent = ready ? '✓ Ready' : 'Ready';
-  showBadge();
-}
-// The top-left badge: red "● REC 0:12 · Back 1×" while recording, grey
-// "Back 1× · not recording" while Ready has the camera on, hidden otherwise.
-function showBadge() {
-  const standby = !recording && ready && cameraLive();
-  document.body.classList.toggle('standby', standby);
-  if (standby) badgeTime.textContent = cameraName() + ' · not recording';   // e.g. "Back 1× · not recording"
-}
-
-/* ---- 4. THE RECORDING ----
+/* ---- 6. THE RECORDING ----
 
    pickFormat() chooses a video format the phone actually supports. iPhone likes
    mp4, which also drops straight into Photos. Other devices may only do webm. */
@@ -838,32 +1118,39 @@ function pickFormat() {
   return '';   // if none matched, let the browser decide
 }
 
-// START recording. Used by the Start button AND the Action Button.
-// Gives back '' if filming began, or a short sentence saying why not (the
-// Action Button's banner shows that sentence).
+// START: switch the camera + microphone on, then record. Used by the Start
+// button AND the Action Button. Gives back '' if filming began, or a short
+// sentence saying why not (the Action Button's banner shows that sentence).
 async function start() {
   if (recording || starting) return '';               // already going
   starting = true;
   showErr('');                                        // clear any old error
-  document.getElementById('saved').classList.remove('open'); // earlier clips stay in the list
+  clipsScreen.classList.remove('open');               // get the clips screen out of the way
+  document.body.classList.add('starting');            // grey "Starting camera…" badge
+  badgeTime.textContent = 'Starting camera…';
+  noteVideo();
   try {
-    if (!cameraLive()) await openCamera();            // reuse the camera if "Ready" has it on
+    await openCamera();
   } catch (e) {
     starting = false;
+    document.body.classList.remove('starting');
+    closeCamera();
     showErr(cameraProblem(e));
-    showBadge();
     return e && e.message === 'timeout'
-      ? "The camera didn't start (iPhone may be asking “Allow camera?”). Leave full screen and tap Ready."
-      : "Couldn't switch the camera on. Open the page and tap Ready first.";
+      ? "The camera didn't switch on. iPhone only allows it while the Reader page is on screen (use the page's own ⛶ Full screen, not YouTube's). Then press again."
+      : "Couldn't switch the camera on. Open the page and tap Start once to allow the camera.";
   }
   starting = false;
-
-  requestWake();                                      // keep the screen awake
+  document.body.classList.remove('starting');
 
   const mimeType = pickFormat();
+  // 5 megabits a second: sharp at this size, and about half the space of
+  // Safari's own setting (about 38 MB per minute), so clips save quicker.
+  const opts = { videoBitsPerSecond: 5000000, audioBitsPerSecond: 128000 };
+  if (mimeType) opts.mimeType = mimeType;
   let rec;
   try {
-    rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    rec = new MediaRecorder(stream, opts);
   } catch (e) {
     rec = new MediaRecorder(stream);                  // very old-phone fallback
   }
@@ -873,6 +1160,7 @@ async function start() {
   rec.ondataavailable = e => { if (e.data && e.data.size) pieces.push(e.data); };
   // When recording stops, run finish() to glue the pieces into one file.
   rec.onstop = () => finish(rec, pieces);
+  rec.camera = cameraName();                          // e.g. "Back 1×", saved with the clip
   rec.start(1000);                                    // save a piece every second
   recorder = rec;
 
@@ -881,11 +1169,14 @@ async function start() {
   recBtn.textContent = '■ Stop';
   flipBtn.disabled = true;                             // grey out flip while filming
   startTimer();
-  showBadge();
+  updateWake();
+  keepVideoPlaying();
   return '';
 }
 
-// STOP recording. Gives back the clip's number (1, 2, 3…).
+// STOP: end the clip, then switch the camera + microphone off straight away.
+// Gives back the clip's number (1, 2, 3…). Nothing pops up: the clip is kept
+// quietly and waits under 🎞.
 function stop() {
   if (!recording) return 0;
   recording = false;
@@ -894,114 +1185,211 @@ function stop() {
   flipBtn.disabled = false;
   stopTimer();
   stopAutoScroll();
+  noteVideo();
   recorder.takeNo = ++takes;                          // this clip's number
   recorder.lengthMs = Date.now() - startTime;         // how long it ran
   if (recorder.state !== 'inactive') recorder.stop(); // triggers finish()
-  // With "Ready" on, the camera stays on for the next press. Otherwise: camera light off.
-  if (!ready) { closeCamera(); releaseWake(); }
-  showBadge();
+  closeCamera();                                      // camera light off
+  updateWake();
+  keepVideoPlaying();
   return recorder.takeNo;
 }
 
-// FINISH: runs once a recorder has bundled all its pieces into one file.
-function finish(rec, pieces) {
-  const type = rec.mimeType || 'video/mp4';
-  // A "Blob" is the finished video held in memory. We glue the pieces together.
-  const blob = new Blob(pieces, { type });
-  const url = URL.createObjectURL(blob);              // a temporary link to that file
-
-  const isMp4 = type.includes('mp4');
-  const ext = isMp4 ? 'mp4' : 'webm';
-  const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-'); // date for the filename
-
-  const name = `recording-${stamp}.${ext}`;
-  // The file the "Save to Photos" button hands to iPhone, made now so the tap
-  // itself has nothing to wait for.
-  const file = new File([blob], name, { type: isMp4 ? 'video/mp4' : blob.type });
-  clips.push({ no: rec.takeNo, blob, url, isMp4, length: rec.lengthMs, name, file });
-  saveMsg('');                                        // clear any old saving message
-  showClips();
-  document.getElementById('saved').classList.add('open');
+/* ---- 7. YOUR CLIPS ----
+   Each finished clip is kept on this phone in IndexedDB: a storage area
+   Safari gives this page, which survives the page reloading or Safari
+   closing. (If that storage isn't available, e.g. a Private tab, clips are
+   only kept until the page closes.) Two drawers: "meta" (number, length,
+   camera, saved yet?) and "video" (the video itself), so ticking a clip as
+   saved never rewrites the video. */
+const clips = [];           // every clip on this page, oldest first
+let db = null;
+function store(mode, job) {
+  if (!db) db = new Promise((ok, fail) => {
+    const req = indexedDB.open('reader-clips', 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore('meta', { keyPath: 'id' });
+      req.result.createObjectStore('video', { keyPath: 'id' });
+    };
+    req.onsuccess = () => ok(req.result);
+    req.onerror = () => fail(req.error);
+  });
+  return db.then(d => new Promise((ok, fail) => {
+    const tx = d.transaction(['meta', 'video'], mode);
+    const out = job(tx.objectStore('meta'), tx.objectStore('video'));
+    tx.oncomplete = () => ok(Array.isArray(out) ? out.map(r => r.result) : out && out.result);
+    tx.onerror = tx.onabort = () => fail(tx.error);
+  }));
+}
+// The details we keep about a clip (everything but the video itself).
+function metaOf(c) {
+  return { id: c.id, no: c.no, name: c.name, type: c.type, length: c.length, camera: c.camera, at: c.at, saved: !!c.saved, savedAt: c.savedAt || 0, size: c.size };
 }
 
-// Draw the saved screen: a playback of the newest clip, then one row per clip
-// (newest first). Each row has a big "Save to Photos" button and a small
-// "Save to Files" link as a backup.
-function showClips() {
-  const newest = clips[clips.length - 1];
-  const player = document.getElementById('savedVideo');
-  if (player.getAttribute('src') !== newest.url) player.src = newest.url;   // only when there's a new clip
-  document.getElementById('clipList').innerHTML = clips.slice().reverse().map(c => `
-    <div class="clipRow">
-      <button class="photosBtn${c.saved ? ' done' : ''}${sharing === c ? ' busy' : ''}" data-no="${c.no}">${
-        sharing === c ? 'Opening the save menu…' : (c.saved ? '✓ ' : '') + `Save clip ${c.no} to Photos · ${clock(c.length)}`}</button>
-      <a class="filesLink" href="${c.url}" download="${c.name}">or Save to Files</a>
-    </div>`).join('');
+// FINISH: runs once a recorder has bundled all its pieces into one file.
+async function finish(rec, pieces) {
+  const type = (rec.mimeType || 'video/mp4').includes('mp4') ? 'video/mp4' : (rec.mimeType || 'video/webm');
+  // A "Blob" is the finished video held in memory. We glue the pieces together.
+  const blob = new Blob(pieces, { type });
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const name = `recording-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${type === 'video/mp4' ? 'mp4' : 'webm'}`;
+  const clip = { id: d.getTime(), no: rec.takeNo, blob, name, type, length: rec.lengthMs, camera: rec.camera, at: d.getTime(), size: blob.size, saved: false };
+  // The file the save buttons hand to iPhone, made now so a tap has nothing to wait for.
+  clip.file = new File([blob], name, { type });
+  clips.push(clip);
+  showClipCount();
+  if (clipsScreen.classList.contains('open')) showClips();
+  // Keep it on the phone, then use the phone's copy (so it isn't held in memory).
+  try {
+    await store('readwrite', (meta, video) => { meta.put(metaOf(clip)); video.put({ id: clip.id, blob }); });
+    const kept = await store('readonly', (meta, video) => video.get(clip.id));
+    if (kept && kept.blob) { clip.blob = kept.blob; clip.file = new File([kept.blob], name, { type }); }
+    clip.kept = true;
+  } catch (e) {
+    // Most likely a Private tab: Safari can't keep videos there. The clip
+    // still waits here, in memory, until the page closes.
+    clip.kept = false;
+    log('could not keep clip on the phone: ' + e);
+    if (clipsScreen.classList.contains('open')) showClips();
+  }
+}
 
-  document.getElementById('saveHelp').innerHTML =
-    'Tap <b>Save to Photos</b>, then choose <b>Save Video</b> in the menu that opens ' +
-    '(it’s in the list below the row of apps; scroll the menu up if you can’t see it).' +
-    '<br>Clips vanish if you close or reload this page, so save the ones you want first.';
+// When the page opens: bring back the clips kept on this phone, and tidy away
+// ones saved to Photos more than 3 days ago.
+async function loadKeptClips() {
+  try {
+    const [metas, videos] = await store('readonly', (meta, video) => [meta.getAll(), video.getAll()]);
+    const oldest = Date.now() - 3 * 24 * 3600 * 1000;
+    for (const m of metas.sort((a, b) => a.id - b.id)) {
+      const v = videos.find(x => x.id === m.id);
+      if (!v || (m.saved && m.savedAt < oldest)) { forget(m.id); continue; }
+      if (clips.some(c => c.id === m.id)) continue;
+      clips.push({ ...m, blob: v.blob, file: new File([v.blob], m.name, { type: m.type }), kept: true });
+    }
+    clips.sort((a, b) => a.id - b.id);
+    takes = Math.max(takes, 0, ...clips.map(c => c.no));
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  } catch (e) { /* no storage: clips live in memory only */ }
+  showClipCount();
+}
+function forget(id) { return store('readwrite', (meta, video) => { meta.delete(id); video.delete(id); }).catch(() => {}); }
+
+// The 🎞 button: how many clips are waiting to be saved (✓ = all saved).
+function showClipCount() {
+  const waiting = clips.filter(c => !c.saved).length;
+  clipsBtn.style.display = clips.length ? '' : 'none';
+  $('clipCount').textContent = waiting || '✓';
+  clipsBtn.classList.toggle('waiting', waiting > 0);
 }
 
 /* SAVE TO PHOTOS
-   A plain download in Safari can only go to the Files app. To reach Photos, we
-   hand the clip to iPhone's share sheet (the same menu as the Share button in
-   other apps). That menu has a "Save Video" option, which puts it in Photos.
-   Rules iPhone enforces, and how this button copes with each:
-     • The menu must be asked for straight from your tap, with no waiting in
-       between. Everything is prepared beforehand, so the tap asks at once.
-     • With a long clip, iPhone needs a moment to load the video before the
-       menu appears. A second tap during that moment makes it start loading
-       all over again, so the button says "Opening the save menu…" and ignores
-       taps until the menu is up.
-     • Only one menu at a time. If iPhone says one is still open, or refuses
-       the tap, the page says so on this screen and the next tap tries again. */
-let sharing = null;   // the clip whose save menu is opening (or open) right now
-document.getElementById('clipList').addEventListener('click', e => {
-  const btn = e.target.closest('.photosBtn');
-  if (!btn) return;
-  const clip = clips.find(c => c.no === +btn.dataset.no);
-  if (!clip) return;
-  if (sharing) return;                                // a menu is already on its way
+   A website can't put videos into Photos by itself; only you can, through
+   iPhone's share menu ("Save Video"). So "Save all" hands every waiting clip
+   to that menu at once, and you choose "Save N Videos". Rules iPhone enforces:
+     • The menu must be asked for straight from your tap. Everything is
+       prepared beforehand, so the tap asks at once.
+     • iPhone loads the videos before the menu appears. A second tap would
+       start that all over again, so the button says "Opening the save menu…"
+       and ignores taps until the menu is up.
+     • Only one menu at a time. If iPhone refuses, the reason shows on this
+       screen and the next tap tries again.
+   Very big batches can overwhelm the menu, so at most about 400 MB go at
+   once ("Save 4 of 9"); the rest go on the next tap. */
+const SHARE_LIMIT = 400 * 1024 * 1024;
+let sharing = null;         // 'all' or a clip id, while a save menu is opening (or open)
+
+// The waiting clips that go in the next "Save all" (oldest first).
+function nextBatch(list = clips.filter(c => !c.saved), limit = SHARE_LIMIT) {
+  const batch = [];
+  let total = 0;
+  for (const c of list) {
+    const size = c.size || (c.file && c.file.size) || 0;
+    if (batch.length && total + size > limit) break;
+    batch.push(c); total += size;
+  }
+  return batch;
+}
+
+function shareClips(list, tag) {
+  if (sharing || !list.length) return;                // a menu is already on its way
   saveMsg('');
-  if (!(navigator.canShare && navigator.canShare({ files: [clip.file] }))) {
-    // This browser can't share files (e.g. a computer). Fall back to a normal download.
-    const a = document.createElement('a');
-    a.href = clip.url; a.download = clip.name; a.click();
+  const files = list.map(c => c.file);
+  if (!(navigator.canShare && navigator.canShare({ files }))) {
+    // This browser can't share files (e.g. a computer). Fall back to downloads.
+    list.forEach(c => { const a = document.createElement('a'); a.href = urlOf(c); a.download = c.name; a.click(); });
     return;
   }
-  sharing = clip;
-  const asked = navigator.share({ files: [clip.file] });   // must be the first thing the tap does
+  sharing = tag;
+  const asked = navigator.share({ files });           // must be the first thing the tap does
   showClips();                                        // button now says "Opening the save menu…"
-  // Safety net: if iPhone never reports back (an old iPhone bug), unlock the
-  // button after 12 seconds so it can be tapped again.
-  const unlock = setTimeout(() => { if (sharing === clip) { sharing = null; showClips(); } }, 12000);
+  // Safety net: if iPhone never reports back, unlock after a minute.
+  const unlock = setTimeout(() => { if (sharing === tag) { sharing = null; showClips(); } }, 60000);
   asked
-    .then(() => { clip.saved = true; })               // the button turns green with a ✓
+    .then(() => markSaved(list))                      // ticked as saved
     .catch(err => {
       if (err.name === 'AbortError') return;          // you closed the menu: nothing to say
-      if (err.name === 'NotAllowedError') saveMsg('iPhone didn’t open the menu that time. Tap Save to Photos again.');
-      else if (err.name === 'InvalidStateError') saveMsg('iPhone is still closing the last menu. Wait a second, then tap Save to Photos again.');
-      else saveMsg('Couldn’t open the save menu (' + err.message + '). Tap “or Save to Files” under the button instead.');
+      if (err.name === 'NotAllowedError') saveMsg('iPhone didn’t open the menu that time. Tap again.');
+      else if (err.name === 'InvalidStateError') saveMsg('iPhone is still finishing the last save. Wait a few seconds and tap again. If it keeps saying this, pull down to reload the page: your clips are kept.');
+      else saveMsg('Couldn’t open the save menu (' + err.message + '). Use “Files” next to a clip instead.');
       log('save menu problem: ' + err.name + ' ' + err.message);
     })
-    .finally(() => { clearTimeout(unlock); if (sharing === clip) sharing = null; showClips(); });
-});
+    .finally(() => { clearTimeout(unlock); if (sharing === tag) sharing = null; showClips(); });
+}
 
-// A message on the saved screen itself (the red error strip would be hidden
+function markSaved(list) {
+  const now = Date.now();
+  list.forEach(c => { c.saved = true; c.savedAt = now; });
+  store('readwrite', meta => { list.forEach(c => meta.put(metaOf(c))); }).catch(() => {});
+  showClipCount();
+}
+
+// A link to a clip's file, for the "Files" download.
+function urlOf(c) { return c.url || (c.url = URL.createObjectURL(c.blob)); }
+
+// Draw the clips screen.
+function showClips() {
+  const waiting = clips.filter(c => !c.saved);
+  const batch = nextBatch(waiting);
+  const btn = $('saveAllBtn');
+  btn.classList.toggle('busy', sharing === 'all');
+  btn.classList.toggle('done', !waiting.length);
+  btn.disabled = !waiting.length;
+  btn.textContent = sharing === 'all' ? 'Opening the save menu…'
+    : !waiting.length ? '✓ All clips saved to Photos'
+    : batch.length < waiting.length ? `Save ${batch.length} of ${waiting.length} to Photos`
+    : waiting.length === 1 ? 'Save clip to Photos' : `Save all ${waiting.length} to Photos`;
+  $('saveAllHelp').innerHTML = waiting.length
+    ? `Then choose <b>${batch.length === 1 ? 'Save Video' : 'Save ' + batch.length + ' Videos'}</b> in the menu that opens (in the list under the row of apps).`
+    : '';
+  const time = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  $('clipList').innerHTML = clips.slice().reverse().map(c => `
+    <div class="clipRow">
+      <div class="clipInfo"><b>Clip ${c.no}</b> · ${clock(c.length)} ${c.saved ? '<span class="ok">✓ saved</span>' : ''}
+        <small>${esc(c.camera || '')} · ${time(c.at)} · ${Math.max(1, Math.round((c.size || 0) / 1048576))} MB</small></div>
+      <button class="oneBtn" data-id="${c.id}"${sharing ? ' disabled' : ''}>${sharing === c.id ? '…' : 'Photos'}</button>
+      <a class="filesLink" data-id="${c.id}" href="#">Files</a>
+      <button class="delBtn" data-id="${c.id}" aria-label="Delete clip ${c.no}">✕</button>
+    </div>`).join('');
+  $('clearSaved').style.display = clips.some(c => c.saved) ? '' : 'none';
+  $('keepNote').style.display = clips.some(c => c.kept === false && !c.saved) ? 'block' : 'none';
+}
+
+// A message on the clips screen itself (the red error strip would be hidden
 // behind it).
 function saveMsg(text) {
-  const el = document.getElementById('saveMsg');
+  const el = $('saveMsg');
   el.textContent = text;
   el.style.display = text ? 'block' : 'none';
 }
 
-/* ---- 5a. THE TIMER ----
+function openClips() { saveMsg(''); showClips(); clipsScreen.classList.add('open'); }
+
+/* ---- 8a. THE TIMER ----
    setInterval repeats a job over and over. Here it updates the clock in the
    REC badge twice a second. */
 function clock(ms){                                   // turns milliseconds into "1:07"
-  const s = Math.floor(ms/1000);
+  const s = Math.floor((ms || 0) / 1000);
   return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
 }
 function startTimer(){
@@ -1012,40 +1400,39 @@ function startTimer(){
 }
 function stopTimer(){ clearInterval(timerId); }
 
-/* ---- 5b. KEEP THE SCREEN AWAKE ----
-   Without this, the phone could auto-lock while you read and kill the camera. */
+/* ---- 8b. KEEP THE SCREEN AWAKE ----
+   While recording, or while the text scrolls by itself, the screen is kept
+   from locking. (A playing YouTube video keeps it awake by itself.) */
 async function requestWake(){
-  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){}
+  try { if (!wakeLock && 'wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){}
 }
 function releaseWake(){ try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch(e){} }
-// If you glance away and come back, grab the wake-lock again. iPhone also
-// switches the camera off when you leave Safari, so if "Ready" was on, quietly
-// switch it back on when you return.
+function updateWake() { if (recording || starting || scrollRAF) requestWake(); else releaseWake(); }
+// iPhone drops the wake-lock when you leave Safari, so grab it again on return.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  if (recording || ready) requestWake();
-  if (ready && !recording && !cameraLive()) openCamera().then(showBadge, showBadge);
-  showBadge();
+  wakeLock = null;
+  updateWake();
 });
 
-/* ---- 5c. AUTO-SCROLL THE TEXT ----
+/* ---- 8c. AUTO-SCROLL THE TEXT ----
    requestAnimationFrame runs a function on every screen refresh (~60 times a
    second), which makes smooth movement. We nudge the text up a little each time. */
 let scrollRAF = null;     // holds the running animation so we can cancel it
 let scrollCarry = 0;      // remembers fractional pixels between frames
 function autoScrollStep(){
-  const speed = +document.getElementById('speed').value;  // 0..100 from the slider
-  scrollCarry += speed / 30;                              // gentle amount per frame
-  if (scrollCarry >= 1) {                                 // only move by whole pixels
+  const speed = +$('speed').value;                     // 0..100 from the slider
+  scrollCarry += speed / 30;                           // gentle amount per frame
+  if (scrollCarry >= 1) {                              // only move by whole pixels
     reader.scrollTop += Math.floor(scrollCarry);
     scrollCarry -= Math.floor(scrollCarry);
   }
-  scrollRAF = requestAnimationFrame(autoScrollStep);       // schedule the next nudge
+  scrollRAF = requestAnimationFrame(autoScrollStep);   // schedule the next nudge
 }
-function startAutoScroll(){ if (!scrollRAF) { scrollBtn.style.color = '#3b82f6'; autoScrollStep(); } }
-function stopAutoScroll(){ if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; scrollBtn.style.color = ''; } }
+function startAutoScroll(){ if (!scrollRAF) { scrollBtn.style.color = '#3b82f6'; autoScrollStep(); updateWake(); } }
+function stopAutoScroll(){ if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; scrollBtn.style.color = ''; updateWake(); } }
 
-/* ---- 5d. SWIPE THE CONTROL BAR AWAY ----
+/* ---- 8d. SWIPE THE CONTROL BAR AWAY ----
    Put a finger on the bottom bar and drag down. The bar follows your finger.
    If you let go after dragging far enough, it slides off the screen and the
    video and text get the whole screen. If you only drag a little, it springs
@@ -1119,48 +1506,6 @@ barHandle.addEventListener('touchmove', e => {
   }
 }, { passive: true });
 
-/* ---- 6. CONNECT THE BUTTONS ----
-   addEventListener('click', …) means "when this button is tapped, run this". */
-
-// The record button: if we're recording, stop; otherwise, start.
-recBtn.addEventListener('click', () => recording ? stop() : start());
-
-readyBtn.addEventListener('click', toggleReady);                           // camera stays on
-document.getElementById('zoomSeg').addEventListener('click', e => {      // 0.5× / 1× / 2×
-  const b = e.target.closest('button');
-  if (b) setZoom(+b.dataset.z);
-});
-showZoom();   // highlight the saved zoom choice
-flipBtn.addEventListener('click', flip);                                   // front/back camera
-scrollBtn.addEventListener('click', () => scrollRAF ? stopAutoScroll() : startAutoScroll());
-gearBtn.addEventListener('click', () => sheet.classList.add('open'));       // open settings
-
-// Close the settings pop-up (either button, or tapping the dim background).
-document.getElementById('closeSheet').addEventListener('click', () => sheet.classList.remove('open'));
-sheet.addEventListener('click', e => { if (e.target === sheet) sheet.classList.remove('open'); });
-
-// Save everything typed in settings, then redraw the page.
-document.getElementById('saveSettings').addEventListener('click', () => {
-  localStorage.setItem('script', scriptBox.value);   // remember the script
-  localStorage.setItem('yt', ytBox.value.trim());    // remember the YouTube link
-  loadScript();                                       // redraw the text
-  loadVideo();                                        // redraw the video
-  sheet.classList.remove('open');
-  reader.scrollTop = 0;                               // back to the top
-});
-
-// Text-size slider updates live and is remembered.
-document.getElementById('fontSize').addEventListener('input', e => {
-  reader.style.fontSize = e.target.value + 'px';
-  localStorage.setItem('fontSize', e.target.value);
-});
-
-// The "Back" button on the saved screen. Your clips stay in the list.
-document.getElementById('closeSaved').addEventListener('click', () => {
-  document.getElementById('saved').classList.remove('open');
-  reader.scrollTop = 0;
-});
-
 // Helper to show or hide the red error strip.
 function showErr(msg){
   if (!msg) { errBox.style.display = 'none'; return; }
@@ -1168,14 +1513,7 @@ function showErr(msg){
   errBox.style.display = 'block';
 }
 
-/* ---- A FRIENDLY SAFETY CHECK ----
-   The camera is only allowed on secure (https) links, or on localhost. If the
-   page was opened a different way, warn the user up front. */
-if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-  showErr('Open this page over https:// — iPhone blocks the camera on plain http links.');
-}
-
-/* ---- 7. THE ACTION BUTTON ----
+/* ---- 9. THE ACTION BUTTON ----
    iPhone doesn't let websites see the Action Button, so it goes the long way
    round, through the internet. It works on any Wi-Fi or on mobile data, and
    no Mac is needed:
@@ -1191,10 +1529,11 @@ if (location.protocol !== 'https:' && location.hostname !== 'localhost' && locat
    The pair code reaches this phone once, through your setup link: it ends in
    #pair=…, and the page saves the code here. The code is never written into
    this file, which is public on GitHub, so nobody who reads the file can
-   press your button. */
+   press your button. (Only the word "toggle" and short status lines travel
+   through the relay. Your videos never do.) */
 const RELAY = 'https://ntfy.sh/';
-const remoteStatus = document.getElementById('remoteStatus');
-const pairWarn = document.getElementById('pairWarn');
+const remoteStatus = $('remoteStatus');
+const pairWarn = $('pairWarn');
 let line = null;        // the open line to ntfy.sh
 let lineCode = null;    // the pair code that line is listening to
 let remoteState = '';   // 'on', 'off' or 'unpaired'
@@ -1207,7 +1546,6 @@ function takePairCodeFromLink() {
   localStorage.setItem('pairCode', m[1]);
   history.replaceState(null, '', location.pathname + location.search);
 }
-takePairCodeFromLink();
 
 // Start listening, unless we already are. Safe to call again and again, which
 // is how a tab that was opened BEFORE you scanned the setup code catches up.
@@ -1251,9 +1589,9 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) list
 // Shortcut shows that as a banner). It always answers, even if something
 // goes wrong, so the banner can say what.
 async function answerPress() {
-  // If the camera is off, switching it on can take a moment, longer than the
-  // Shortcut waits. So say so straight away, then report the result.
-  if (!recording && !starting && !cameraLive()) {
+  // Switching the camera on can take a moment, longer than the Shortcut
+  // waits. So say so straight away, then report the result.
+  if (!recording && !starting) {
     fetch(RELAY + lineCode + '_r', { method: 'POST', body: '◌ Switching the camera on…' }).catch(() => {});
   }
   let result;
@@ -1277,11 +1615,10 @@ function log(text) {
 // Pop up a short message for a few seconds.
 let toastTimer;
 function toast(text) {
-  const el = document.getElementById('toast');
-  el.textContent = text;
-  el.classList.add('show');
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3500);
 }
 
 // Start if stopped, stop if recording. Gives back the sentence for the banner.
@@ -1289,7 +1626,7 @@ async function remoteToggle() {
   if (starting) return { ok: false, text: 'Still starting. Press again in a second.' };
   if (recording) {
     const n = stop();
-    return { ok: true, text: '■ Stopped. Clip ' + n + ' is on the page, ready to save.' };
+    return { ok: true, text: '■ Stopped. Clip ' + n + ' kept, camera and mic off.' };
   }
   const problem = await start();
   if (problem) return { ok: false, text: '⚠️ ' + problem };
@@ -1307,9 +1644,117 @@ function showRemote(state) {
   }[state];
 }
 
+/* ---- 10. CONNECT THE BUTTONS, AND GET GOING ----
+   addEventListener('click', …) means "when this is tapped, run this". */
+
+// The record button: if we're recording, stop; otherwise, start.
+recBtn.addEventListener('click', () => {
+  if (recording) { const n = stop(); toast('■ Clip ' + n + ' kept. Tap 🎞 when you’re done to save to Photos.'); }
+  else start();
+});
+clipsBtn.addEventListener('click', openClips);
+flipBtn.addEventListener('click', flip);                                    // front/back camera
+scrollBtn.addEventListener('click', () => scrollRAF ? stopAutoScroll() : startAutoScroll());
+gearBtn.addEventListener('click', () => sheet.classList.add('open'));        // open settings
+$('zoomSeg').addEventListener('click', e => {                              // 0.5× / 1× / 2×
+  const b = e.target.closest('button');
+  if (b) setZoom(+b.dataset.z);
+});
+$('modeSeg').addEventListener('click', e => {                              // Video / Text
+  const b = e.target.closest('button');
+  if (b) setMode(b.dataset.mode);
+});
+
+// Video mode's buttons.
+$('fullBtn').addEventListener('click', () => { theaterByButton = true; updateTheater(); });
+$('exitTheater').addEventListener('click', () => {
+  theaterByButton = false;
+  if (sideways.matches) theaterDismissed = true;      // stay out until the phone turns again
+  updateTheater();
+});
+$('changeBtn').addEventListener('click', () => {
+  document.body.classList.toggle('editingLink');
+  if (document.body.classList.contains('editingLink')) $('linkBox').focus();
+});
+$('linkForm').addEventListener('submit', e => {
+  e.preventDefault();                                 // stay on this page
+  const id = youtubeId($('linkBox').value);
+  if (!id) {
+    $('linkMsg').textContent = 'That doesn’t look like a YouTube link. Copy it from the YouTube app’s Share button.';
+    $('linkMsg').style.display = 'block';
+    return;
+  }
+  $('linkBox').blur();                                // put the keyboard away
+  playVideo(id);
+});
+$('recentList').addEventListener('click', e => {
+  const b = e.target.closest('.recent');
+  if (b) playVideo(b.dataset.id);
+});
+
+// The clips screen's buttons.
+$('saveAllBtn').addEventListener('click', () => shareClips(nextBatch(), 'all'));
+$('clipList').addEventListener('click', e => {
+  const t = e.target.closest('[data-id]');
+  if (!t) return;
+  const clip = clips.find(c => c.id === +t.dataset.id);
+  if (!clip) return;
+  if (t.classList.contains('oneBtn')) shareClips([clip], clip.id);
+  else if (t.classList.contains('filesLink')) {
+    // A plain download: goes to the Files app (Downloads).
+    e.preventDefault();
+    const a = document.createElement('a');
+    a.href = urlOf(clip); a.download = clip.name; a.click();
+  } else if (t.classList.contains('delBtn')) {
+    if (!confirm('Delete clip ' + clip.no + '?' + (clip.saved ? '' : ' It hasn’t been saved to Photos yet.'))) return;
+    clips.splice(clips.indexOf(clip), 1);
+    forget(clip.id);
+    showClips(); showClipCount();
+    if (!clips.length) clipsScreen.classList.remove('open');
+  }
+});
+$('clearSaved').addEventListener('click', () => {
+  const saved = clips.filter(c => c.saved);
+  if (!confirm('Remove ' + saved.length + ' saved clip' + (saved.length === 1 ? '' : 's') + ' from this page? They stay in Photos.')) return;
+  saved.forEach(c => { clips.splice(clips.indexOf(c), 1); forget(c.id); });
+  showClips(); showClipCount();
+  if (!clips.length) clipsScreen.classList.remove('open');
+});
+$('closeClips').addEventListener('click', () => clipsScreen.classList.remove('open'));
+
+// Close the settings pop-up (either button, or tapping the dim background).
+$('closeSheet').addEventListener('click', () => sheet.classList.remove('open'));
+sheet.addEventListener('click', e => { if (e.target === sheet) sheet.classList.remove('open'); });
+
+// Save the script typed in settings, then redraw the text.
+$('saveSettings').addEventListener('click', () => {
+  localStorage.setItem('script', scriptBox.value);
+  loadScript();
+  sheet.classList.remove('open');
+  if (mode === 'text') reader.scrollTop = 0;
+});
+
+// Text-size slider updates live and is remembered.
+$('fontSize').addEventListener('input', e => {
+  reader.style.fontSize = e.target.value + 'px';
+  localStorage.setItem('fontSize', e.target.value);
+});
+
 // Tap the yellow strip to hide it for this visit.
 pairWarn.addEventListener('click', () => { pairWarn.dataset.hidden = '1'; pairWarn.classList.remove('show'); });
 
+/* A FRIENDLY SAFETY CHECK: the camera is only allowed on secure (https)
+   links, or on localhost. If the page was opened a different way, say so. */
+if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  showErr('Open this page over https:// — iPhone blocks the camera on plain http links.');
+}
+
+// Get going.
+loadScript();
+showFacing();
+showZoom();
+setMode(mode);
+loadKeptClips();
 listenForActionButton();
 </script>
 </body>
