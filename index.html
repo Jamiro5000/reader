@@ -7,8 +7,9 @@
 
     1. Shows you something to watch or read. It has two modes, picked with the
        "Video" / "Text" buttons at the top:
-         • Video mode: a YouTube-style page that plays the YouTube link you
-           paste, with a list of your recent videos underneath.
+         • Video mode: a YouTube-style page for the YouTube link you paste:
+           the normal YouTube player (tap to play, its own full screen), then
+           the title, views, likes, description, comments and more videos.
          • Text mode: just your script, to read (it can scroll by itself).
     2. Films you (or your whiteboard) using the phone's camera. The camera and
        microphone are ONLY switched on while you're recording, never in
@@ -109,7 +110,7 @@
     /* ========================================================================
        CSS SECTION 4 — THE "● REC" BADGE  (your small recording indicator)
        This is the small sign that filming is happening. It stays on screen
-       even when you've swiped the control bar away, and even in full screen.
+       even when you've swiped the control bar away.
          • grey "Starting camera…"               = the camera is switching on
          • red, throbbing "● REC 0:12 · Back 1×"  = recording right now
        "Back 1×" is the camera that's really on and its zoom, so you can check
@@ -128,7 +129,7 @@
       border-radius: 999px;            /* fully rounded pill shape */
       font-family: -apple-system, system-ui, sans-serif;
       font-size: 13px; font-weight: 600;
-      z-index: 95;                     /* above everything, even full screen */
+      z-index: 95;                     /* above everything on the page */
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
     }
@@ -225,11 +226,15 @@
 
     /* ---- VIDEO MODE: laid out like YouTube's watch page ----
        The player sits at the top, edge to edge, and stays there while you
-       scroll the information and your recent videos underneath. */
+       scroll everything underneath: the title, channel, buttons, description,
+       comments, then more videos. The player itself is YouTube's normal one:
+       tap it to play, and use its own full-screen button. */
     #videoMode { font-family: -apple-system, system-ui, sans-serif; line-height: 1.35; font-size: 15px; color: #f1f1f1; }
+    :where(#videoMode) a { color: inherit; text-decoration: none; }   /* links look like the text around them */
     #player {
       position: sticky; top: 0; z-index: 5;
       width: 100%; aspect-ratio: 16 / 9;
+      max-height: 70dvh;               /* phone sideways: never taller than the screen */
       background: #000;
       display: flex; align-items: center; justify-content: center;
     }
@@ -239,29 +244,6 @@
     body:not(.hasVideo) #ytWrap { display: none; }
     body:not(.hasVideo) #noVideoMsg { display: block; }
 
-    #vInfo { padding: 12px 12px 4px; }
-    body:not(.hasVideo) #vInfo { display: none; }
-    #vTitle {
-      font-size: 18px; font-weight: 700; line-height: 1.3; margin: 0 0 4px;
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-    }
-    #vChannel { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
-    #vAvatar {
-      flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%;
-      background: #3f51b5; color: #fff; display: grid; place-items: center; font-weight: 700;
-    }
-    #vAuthor { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #vOpen {
-      flex: 0 0 auto; background: #f1f1f1; color: #0f0f0f; text-decoration: none;
-      padding: 8px 14px; border-radius: 18px; font-size: 14px; font-weight: 600;
-    }
-    /* The row of grey pill buttons (Full screen, Change video). */
-    .chipRow { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
-    .chipRow button {
-      background: var(--chip); color: #f1f1f1; white-space: nowrap;
-      padding: 9px 14px; border-radius: 18px; font-size: 14px; font-weight: 600;
-    }
-
     /* The box for pasting a YouTube link. Shown when there's no video yet, or
        after you tap "Change video". */
     #linkForm { display: none; gap: 8px; padding: 12px; }
@@ -270,56 +252,136 @@
     #linkForm button { background: var(--accent); color: #fff; font-weight: 600; }
     #linkMsg { display: none; color: #ffb4b4; font-size: 13px; padding: 0 12px 8px; }
 
-    /* "Recent videos": the links you've played before, like YouTube's list of
-       videos under the player. Tap one to play it again. */
-    #recentHead { font-size: 16px; margin: 16px 12px 8px; }
-    #recentList { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 24px; }
-    .recent {
-      display: flex; gap: 10px; align-items: flex-start; text-align: left;
-      background: none; padding: 0; color: #f1f1f1; border-radius: 0;
-    }
-    .recent img { flex: 0 0 auto; width: 168px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: #222; }
-    .recent span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .recent b {
-      font-size: 14px; font-weight: 600; line-height: 1.3;
-      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-    }
-    .recent small { color: #aaa; font-size: 12px; }
+    /* Everything under the player. Hidden while the comments are open (they
+       take its place, like on YouTube). */
+    body:not(.hasVideo) #vInfo, body:not(.hasVideo) #commentsCard, body:not(.hasVideo) #commentsPanel { display: none; }
+    body.commentsOpen #watch { display: none; }
 
-    /* ---- FULL SCREEN, the page's own ----
-       YouTube's own full-screen button is switched off on purpose: while a
-       video is in iPhone's full screen, iPhone won't let the page switch the
-       camera on, so the Action Button couldn't start a recording. Instead the
-       page makes the player fill the screen itself, which keeps the page "on
-       screen" as far as iPhone is concerned.
-         • Phone sideways: the video fills the screen automatically.
-         • Phone upright + "⛶ Full screen": the video is turned sideways for
-           you; turn the phone to watch it. The ✕ in the corner leaves. */
-    body.theater #player {
-      position: fixed; inset: 0; z-index: 90;
-      width: auto; height: auto; aspect-ratio: auto;
+    #vInfo { padding: 12px 12px 0; }
+    #vTitle {
+      font-size: 18px; font-weight: 700; line-height: 1.3; margin: 0;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
-    body.theater #ytWrap { width: min(100vw, calc(100dvh * 16 / 9)); height: min(100dvh, calc(100vw * 9 / 16)); }
-    body.theater.rotated #player {
-      inset: auto; top: 0; left: 100vw;
-      width: 100dvh; height: 100vw;
-      transform-origin: 0 0; transform: rotate(90deg);   /* turn it a quarter clockwise */
+    body.descOpen #vTitle { display: block; }                 /* the whole title once opened */
+    /* "1.8B views · 16 years ago ...more": tap it to open the description. */
+    #vMeta {
+      display: block; width: 100%; text-align: left;
+      background: none; padding: 4px 0 0; border-radius: 0;
+      color: #aaa; font-size: 13px;
     }
-    body.theater.rotated #ytWrap { width: min(100dvh, calc(100vw * 16 / 9)); height: min(100vw, calc(100dvh * 9 / 16)); }
-    body.theater #bar, body.theater #barHandle { display: none !important; }
-    #exitTheater {
-      display: none; position: absolute; top: 10px; right: 10px; z-index: 3;
-      width: 40px; height: 40px; padding: 0; border-radius: 50%;
-      background: rgba(0,0,0,.55); color: #fff; font-size: 18px;
+    #vMeta b { color: #f1f1f1; font-weight: 600; margin-left: 4px; }
+    #vMeta:active { transform: none; }
+    body.descOpen #vMeta b { display: none; }               /* no "...more" once it's open */
+
+    #vChannel { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+    #vAvatar {
+      position: relative; flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; overflow: hidden;
+      background: #3f51b5; color: #fff; display: grid; place-items: center; font-weight: 700;
     }
-    body.theater #exitTheater { display: block; }
-    body.theater:not(.rotated) #exitTheater { right: calc(env(safe-area-inset-right) + 10px); }
-    /* In full screen, the REC badge and pop-up messages move onto the video, so
-       they turn with it. */
-    #player #recBadge { position: absolute; top: 10px; left: 10px; }
-    body.theater:not(.rotated) #player #recBadge { left: calc(env(safe-area-inset-left) + 10px); }
-    body.theater.rotated #player #recBadge { left: calc(env(safe-area-inset-top) + 6px); }
-    #player #toast { position: absolute; top: 56px; }
+    #vAvatar img, .cAv img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }   /* the photo covers the letter */
+    #vChanText { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+    #vAuthor { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #vSubs { color: #aaa; font-size: 12px; white-space: nowrap; }
+    #subBtn {
+      flex: 0 0 auto; background: #f1f1f1; color: #0f0f0f;
+      padding: 8px 14px; border-radius: 18px; font-size: 14px; font-weight: 600;
+    }
+
+    /* The row of grey pill buttons (likes, Share, YouTube, Change video). It
+       scrolls sideways if it doesn't fit. */
+    .pills { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+    .pills::-webkit-scrollbar { display: none; }
+    .pill {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+      background: var(--chip); color: #f1f1f1; white-space: nowrap;
+      padding: 8px 14px; border-radius: 18px; font-size: 14px; font-weight: 600;
+    }
+    .pill .sep { width: 1px; height: 20px; background: rgba(255,255,255,.2); margin: 0 4px; }
+
+    /* The description: a grey rounded box, opened with "...more". */
+    #descBox {
+      display: none; margin: 12px 0 0; padding: 12px;
+      background: rgba(255,255,255,.1); border-radius: 12px;
+      font-size: 14px; line-height: 1.45;
+    }
+    body.descOpen #descBox { display: block; }
+    #descStats { font-weight: 600; margin-bottom: 6px; }
+    #descText { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #descText a { color: #3ea6ff; }
+    #descLess { background: none; padding: 10px 0 0; border-radius: 0; color: #f1f1f1; font-size: 14px; font-weight: 600; }
+
+    /* Comments, closed: a grey box with how many there are and the top one.
+       Tap it to read them all. */
+    #commentsCard {
+      display: block; width: calc(100% - 24px); margin: 12px; padding: 12px;
+      text-align: left; color: #f1f1f1;
+      background: rgba(255,255,255,.1); border-radius: 12px;
+    }
+    #commentsCard .head { display: block; font-weight: 700; font-size: 15px; }
+    #commentsCard .head span { color: #aaa; font-weight: 400; margin-left: 6px; }
+    #cPreview { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; color: #ddd; }
+    #cPreview .cAv { width: 24px; height: 24px; font-size: 11px; }
+    #cPreview .t { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* Comments, open: the full list, in place of everything under the player.
+       Its heading (with ✕) stays just under the player as you scroll. */
+    #commentsPanel { display: none; padding: 0 12px 24px; }
+    body.commentsOpen #commentsPanel { display: block; }
+    #cHead {
+      position: sticky; z-index: 4;
+      top: min(calc((100vw - env(safe-area-inset-left) - env(safe-area-inset-right)) * 9 / 16), 70dvh);
+      display: flex; align-items: center; gap: 8px; padding: 10px 0;
+      background: var(--vbg); border-bottom: 1px solid rgba(255,255,255,.1);
+    }
+    #cHead b { font-size: 17px; }
+    #cHead span { flex: 1; color: #aaa; }
+    #closeComments { background: none; padding: 4px 8px; font-size: 22px; line-height: 1; color: #f1f1f1; }
+    .cmt { display: flex; gap: 12px; padding: 12px 0 2px; }
+    .cAv {
+      position: relative; flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; overflow: hidden;
+      background: #5c6bc0; color: #fff; display: grid; place-items: center;
+      font-size: 14px; font-weight: 600;
+    }
+    .replyList .cAv { width: 24px; height: 24px; font-size: 11px; }
+    .cBody { flex: 1; min-width: 0; }
+    .cPin { color: #aaa; font-size: 12px; margin-bottom: 2px; }
+    .cTop { color: #aaa; font-size: 12px; }
+    .cTop .own { background: #3a3a3a; color: #f1f1f1; padding: 1px 7px; border-radius: 9px; }
+    .cText {
+      font-size: 14px; line-height: 1.4; margin-top: 2px;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+      display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .cText.open { display: block; }                          /* tapped: the whole comment */
+    .cActs { display: flex; gap: 16px; align-items: center; color: #aaa; font-size: 12px; margin-top: 6px; }
+    .cReplies { background: none; padding: 8px 0; border-radius: 0; color: #3ea6ff; font-size: 14px; font-weight: 600; }
+    .cReplies:active { transform: none; }
+    #cMore, .moreReplies { display: block; margin: 10px auto; background: var(--chip); color: #f1f1f1; padding: 9px 16px; border-radius: 18px; font-size: 14px; font-weight: 600; }
+    .moreReplies { margin: 4px 0 8px; background: none; color: #3ea6ff; padding: 6px 0; }
+    #cNote { color: #aaa; font-size: 14px; padding: 18px 0; text-align: center; }
+    #cNote a { color: #3ea6ff; }
+
+    /* More videos, chosen with two chips like YouTube's: "Up next" (videos
+       YouTube suggests for this one) and "Watched" (the links you've played
+       here before). Tap one to play it. */
+    #listChips { display: flex; gap: 8px; padding: 4px 12px 12px; }
+    #listChips button { background: var(--chip); color: #f1f1f1; padding: 7px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    #listChips button.on { background: #f1f1f1; color: #0f0f0f; }
+    #videoList { display: flex; flex-direction: column; gap: 18px; padding-bottom: 24px; }
+    .vcard { display: block; width: 100%; text-align: left; background: none; padding: 0; border-radius: 0; color: #f1f1f1; }
+    .vcard .thumb { position: relative; display: block; aspect-ratio: 16 / 9; background: #222; }
+    .vcard img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .vcard i {
+      position: absolute; right: 8px; bottom: 8px;
+      background: rgba(0,0,0,.8); color: #fff; font-style: normal;
+      font-size: 12px; font-weight: 600; padding: 1px 5px; border-radius: 4px;
+    }
+    .vcard .vtext { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 0; }
+    .vcard b {
+      font-size: 15px; font-weight: 600; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .vcard small { color: #aaa; font-size: 12px; }
 
     /* ========================================================================
        CSS SECTION 7 — THE BOTTOM CONTROL BAR
@@ -489,6 +551,7 @@
     .clipInfo { flex: 1; min-width: 0; font-size: 14px; line-height: 1.35; }
     .clipInfo small { display: block; color: var(--muted); font-size: 12px; }
     .clipInfo .ok { color: #4ade80; font-weight: 600; }
+    .clipInfo .warn { color: #fbbf24; }
     .clipRow button, .clipRow a { flex: 0 0 auto; font-size: 13px; padding: 8px 10px; border-radius: 10px; }
     .clipRow a { color: var(--muted); }
     .clipRow .delBtn { background: none; color: var(--muted); padding: 8px 6px; }
@@ -542,21 +605,6 @@
       <div id="player">
         <div id="ytWrap"><div id="ytHolder"><!-- the YouTube player goes here --></div></div>
         <div id="noVideoMsg">Paste a YouTube link below to watch it here.</div>
-        <button id="exitTheater" aria-label="Leave full screen">✕</button>
-      </div>
-
-      <!-- The video's title and channel, then the grey pill buttons. -->
-      <div id="vInfo">
-        <h1 id="vTitle"></h1>
-        <div id="vChannel">
-          <span id="vAvatar"></span>
-          <span id="vAuthor"></span>
-          <a id="vOpen" target="_blank" rel="noopener">Open in YouTube</a>
-        </div>
-        <div class="chipRow">
-          <button id="fullBtn">⛶ Full screen</button>
-          <button id="changeBtn">🔗 Change video</button>
-        </div>
       </div>
 
       <!-- Paste a YouTube link here. -->
@@ -566,8 +614,54 @@
       </form>
       <div id="linkMsg"></div>
 
-      <h2 id="recentHead">Recent videos</h2>
-      <div id="recentList"><!-- filled in by JavaScript --></div>
+      <!-- Everything under the player (the comments list replaces it while open). -->
+      <div id="watch">
+        <div id="vInfo">
+          <h1 id="vTitle"></h1>
+          <!-- "1.8B views · 16 years ago ...more" (opens the description) -->
+          <button id="vMeta"></button>
+          <div id="vChannel">
+            <span id="vAvatar"></span>
+            <span id="vChanText"><span id="vAuthor"></span><span id="vSubs"></span></span>
+            <!-- Opens the channel in YouTube, which asks "Subscribe?" -->
+            <a id="subBtn" target="_blank" rel="noopener">Subscribe</a>
+          </div>
+          <div class="pills">
+            <!-- Likes (tap to open the video in YouTube, where you can like it) -->
+            <a id="likePill" class="pill" target="_blank" rel="noopener">👍 <span id="vLikes">Like</span><span class="sep"></span>👎</a>
+            <button id="shareBtn" class="pill">↗ Share</button>
+            <a id="vOpen" class="pill" target="_blank" rel="noopener">▶ YouTube</a>
+            <button id="changeBtn" class="pill">🔗 Change video</button>
+          </div>
+          <!-- The description, opened with "...more". -->
+          <div id="descBox">
+            <div id="descStats"></div>
+            <div id="descText"></div>
+            <button id="descLess">Show less</button>
+          </div>
+        </div>
+
+        <!-- Comments, closed: how many, and the top one. Tap to read them all. -->
+        <button id="commentsCard">
+          <span class="head">Comments<span id="cCount"></span></span>
+          <span id="cPreview">Loading…</span>
+        </button>
+
+        <!-- More videos: "Up next" (suggested) or "Watched" (your history). -->
+        <div id="listChips">
+          <button data-list="next">Up next</button>
+          <button data-list="watched">Watched</button>
+        </div>
+        <div id="videoList"><!-- filled in by JavaScript --></div>
+      </div>
+
+      <!-- Comments, open: the full list. -->
+      <div id="commentsPanel">
+        <div id="cHead"><b>Comments</b><span id="cCount2"></span><button id="closeComments" aria-label="Close comments">✕</button></div>
+        <div id="cList"><!-- filled in by JavaScript --></div>
+        <div id="cNote"></div>
+        <button id="cMore">Show more comments</button>
+      </div>
     </section>
 
     <!-- TEXT MODE: just your script. -->
@@ -644,9 +738,12 @@
           starts (the top-left badge shows <b>● REC</b>). <b>Press again:</b>
           recording stops and the camera and microphone switch off. A banner
           confirms each press about two seconds later.</p>
-        <p><b>Keep this page on screen.</b> iPhone only lets a page switch the
-          camera on while you can see it. In Video mode, use the page's own
-          <b>⛶ Full screen</b> (or turn the phone sideways), not YouTube's.</p>
+        <p><b>Keep this page on screen.</b> iPhone only lets a page use the
+          camera while you can see the page. A video in iPhone's own full
+          screen covers the page, so iPhone pauses the camera and microphone
+          then: a press can't start a recording, and if you're already
+          recording, that part of the clip freezes and goes quiet (the clip is
+          marked ⚠ under 🎞). Leave full screen before you press.</p>
         <p><b>Saving:</b> clips wait under <b>🎞</b> in the bar. When you're
           done, tap 🎞 → <b>Save all to Photos</b>.</p>
         <p><b>Tip:</b> in Safari tap <b>aA → Website Settings</b> and set Camera
@@ -691,7 +788,7 @@
    Below, in order:
      1. Grab references to the HTML boxes/buttons.
      2. Text mode: your script.
-     3. Video mode: the YouTube player, recent videos, and full screen.
+     3. Video mode: the YouTube player, details, comments, more videos.
      4. Switching between Video mode and Text mode.
      5. The camera (and its zoom).
      6. The recording (start, stop).
@@ -776,9 +873,11 @@ if (savedSize) { reader.style.fontSize = savedSize + 'px'; $('fontSize').value =
 
 /* ---- 3. VIDEO MODE ----
    The player is YouTube's own, from youtube-nocookie.com (YouTube's privacy
-   address). We load it through YouTube's "player code", which lets this page
-   pause it, and nudge it to keep playing if iPhone pauses it when the
-   microphone switches on. If that code can't load, a plain player is used. */
+   address), the same player YouTube puts on any website: tap it to play, and
+   its full-screen button opens iPhone's normal full-screen player. We load
+   it through YouTube's "player code", which lets this page pause it, and
+   nudge it to keep playing if iPhone pauses it when the microphone switches
+   on. If that code can't load, a plain player is used. */
 
 // Pull the YouTube video id out of almost any YouTube link you paste.
 function youtubeId(url) {
@@ -789,6 +888,8 @@ function youtubeId(url) {
   return m ? m[1] : '';
 }
 function currentVideoId() { return youtubeId(localStorage.getItem('yt') || ''); }
+// A real video id is exactly 11 letters, digits, "-" or "_". Anything else is ignored.
+function isVideoId(id) { return /^[A-Za-z0-9_-]{11}$/.test(id || ''); }
 
 let ytPlayer = null;        // the YouTube player, once it exists
 let ytLoading = false;      // true while YouTube's player code is downloading
@@ -818,20 +919,19 @@ function showVideo(id) {
     ytPlayer = new YT.Player('ytHolder', {
       videoId: playerVideoId,
       host: 'https://www.youtube-nocookie.com',
-      // playsinline: play on the page, not in iPhone's full screen.
-      // fs: 0 hides YouTube's full-screen button (see "FULL SCREEN" in the CSS).
-      // rel: 0 keeps suggestions to the same channel.
-      playerVars: { playsinline: 1, fs: 0, rel: 0 }
+      // playsinline: play on the page until you choose full screen yourself.
+      // rel: 0 keeps the suggestions at the end to the same channel.
+      playerVars: { playsinline: 1, rel: 0 }
     });
   }).catch(() => {
     ytPlayer = { plain: true };
     plainPlayer(playerVideoId);
   });
 }
-// The fallback: a plain YouTube player.
+// The fallback: a plain YouTube player, exactly as YouTube's "Embed" gives it.
 function plainPlayer(id) {
   $('ytWrap').innerHTML = id ? '<iframe src="https://www.youtube-nocookie.com/embed/' + id +
-    '?playsinline=1&rel=0&fs=0" allow="encrypted-media; picture-in-picture"></iframe>' : '';
+    '?playsinline=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>' : '';
 }
 // Pause the video (used when you switch to Text mode).
 function pauseVideo() {
@@ -859,35 +959,345 @@ function loadVideo() {
   document.body.classList.toggle('hasVideo', !!id);
   if (id && mode === 'video') showVideo(id);
   if (id) showInfo(id);
-  showRecent();
-  updateTheater();
+  showList();
 }
 
-// The title and channel under the player. YouTube tells us these (its
-// "oEmbed" lookup); until it answers, we show what we remember.
+/* WHAT'S UNDER THE PLAYER
+   YouTube only tells other websites a video's title and channel (its
+   "oEmbed" lookup). The rest (views, likes, description, comments and
+   suggested videos) comes from free public copies of YouTube's data, run by
+   volunteers: "Invidious" and "Piped" servers. Any one of them can be down,
+   so the page tries each in turn and remembers which one worked. They only
+   learn which video you're looking at, nothing else. If none answers, you
+   still get the title and channel, and a link to the comments in YouTube. */
+const MIRRORS = [
+  { kind: 'invidious', base: 'https://invidious.f5.si' },
+  { kind: 'piped', base: 'https://api.piped.private.coffee' }
+];
+let moreMirrors = null;     // more Invidious servers from the public list (looked up only if needed)
+
+// Ask a server for some data, giving up after 8 seconds.
+async function getJSON(url, ms = 8000) {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: stop.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
+// The servers to try, the one that worked last time first.
+function mirrorsInOrder() {
+  const last = localStorage.getItem('mirror');
+  return MIRRORS.slice().sort((a, b) => (b.base === last) - (a.base === last));
+}
+// If those are all down: more Invidious servers that let other websites use them.
+function findMoreMirrors() {
+  if (!moreMirrors) moreMirrors = getJSON('https://api.invidious.io/instances.json?sort_by=health')
+    .then(list => list
+      .filter(([, i]) => i && i.type === 'https' && i.api && i.cors && /^https:\/\/[\w.-]+$/.test(i.uri))
+      .map(([, i]) => ({ kind: 'invidious', base: i.uri }))
+      .slice(0, 4))
+    .catch(() => []);
+  return moreMirrors;
+}
+// Try each server in turn with "job" until one answers. "first" = try this one first.
+async function fromAnyMirror(job, first) {
+  const tried = new Set();
+  const attempt = async list => {
+    for (const m of list) {
+      if (tried.has(m.base)) continue;
+      tried.add(m.base);
+      try {
+        const out = await job(m);
+        if (out) { localStorage.setItem('mirror', m.base); return out; }
+      } catch (e) { /* that one's down: try the next */ }
+    }
+    return null;
+  };
+  return (await attempt((first ? [first] : []).concat(mirrorsInOrder()))) || attempt(await findMoreMirrors());
+}
+
+// A video's details, from whichever server answers (remembered per video).
+const detailsFound = {};
+function videoDetails(id) {
+  if (!detailsFound[id]) detailsFound[id] = fromAnyMirror(async m => {
+    const d = m.kind === 'piped'
+      ? fromPiped(await getJSON(m.base + '/streams/' + id))
+      : fromInvidious(await getJSON(m.base + '/api/v1/videos/' + id));
+    if (!d.title) return null;
+    d.mirror = m;
+    return d;
+  }).then(d => { if (!d) delete detailsFound[id]; return d; });   // none answered: ask again next time
+  return detailsFound[id];
+}
+// The two kinds of server answer differently; turn both into the same shape.
+function fromInvidious(j) {
+  const pics = j.authorThumbnails || [];
+  return {
+    title: j.title || '', author: j.author || '',
+    channel: /^UC[\w-]{22}$/.test(j.authorId || '') ? 'https://www.youtube.com/channel/' + j.authorId : '',
+    avatar: picture((pics.find(p => p.width >= 68) || pics[pics.length - 1] || {}).url),
+    subs: j.subCountText || '',
+    views: +j.viewCount || 0, likes: +j.likeCount || 0,
+    when: (+j.published || 0) * 1000,
+    description: j.description || '',
+    related: (j.recommendedVideos || []).map(r => ({
+      id: r.videoId, title: r.title, author: r.author,
+      views: count(r.viewCount) || r.viewCountText || '', age: r.publishedText || '', length: +r.lengthSeconds || 0 }))
+  };
+}
+function fromPiped(j) {
+  return {
+    title: j.title || '', author: j.uploader || '',
+    channel: /^\/channel\/UC[\w-]{22}$/.test(j.uploaderUrl || '') ? 'https://www.youtube.com' + j.uploaderUrl : '',
+    avatar: picture(j.uploaderAvatar),
+    subs: count(j.uploaderSubscriberCount),
+    views: +j.views || 0, likes: +j.likes || 0,
+    when: Date.parse(j.uploadDate || '') || 0,
+    description: htmlToText(j.description || ''),
+    related: (j.relatedStreams || []).filter(r => r.type === 'stream').map(r => ({
+      id: ((r.url || '').match(/v=([\w-]{11})/) || [])[1], title: r.title, author: r.uploaderName,
+      views: count(r.views), age: r.uploadedDate || '', length: r.duration > 0 ? r.duration : 0 }))
+  };
+}
+
+// Little helpers for showing that information.
+// A picture from a server: only plain https:// picture addresses are used.
+function picture(url) {
+  if (typeof url !== 'string') return '';
+  if (url.startsWith('//')) url = 'https:' + url;
+  return /^https:\/\/[^\s"'<>]+$/.test(url) ? url : '';
+}
+// Some servers send text as web code (HTML): keep just the words and line breaks.
+function htmlToText(html) {
+  const doc = new DOMParser().parseFromString(String(html).replace(/<br\s*\/?>/gi, '\n'), 'text/html');
+  return doc.body.textContent || '';
+}
+// 1827709112 → "1.8B", 19488154 → "19.4M", the way YouTube shortens numbers.
+const shortNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1, roundingMode: 'trunc' });
+function count(n) { n = +n; return n > 0 ? shortNumber.format(n) : ''; }
+// A date as "16 years ago".
+function ago(ms) {
+  const s = (Date.now() - ms) / 1000;
+  for (const [name, size] of [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    const n = Math.floor(s / size);
+    if (n >= 1) return n + ' ' + name + (n > 1 ? 's' : '') + ' ago';
+  }
+  return 'just now';
+}
+// A video's length: 204 → "3:24".
+function lengthText(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
+}
+// Text made safe for the page, with web addresses turned into links.
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<]+/g, u => '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
+}
+// A round picture of someone: their first letter, with their photo on top
+// once it loads (if the photo fails, the letter stays).
+function avatarHtml(name, pic) {
+  const letter = esc(String(name || '?').replace(/^@/, '').trim().charAt(0).toUpperCase() || '?');
+  return letter + (pic ? '<img src="' + esc(pic) + '" alt="" loading="lazy" onerror="this.remove()">' : '');
+}
+
+// Fill in the title, views, channel, likes and description.
+let infoFor = '';           // which video the info under the player is about
 async function showInfo(id) {
-  const known = recentVideos().find(v => v.id === id) || {};
-  drawInfo(id, known);
-  const fresh = await videoInfo(id);
+  if (infoFor !== id) {                               // a different video: start fresh
+    infoFor = id;
+    document.body.classList.remove('descOpen', 'commentsOpen');
+    related = [];
+    comments = null;
+    drawInfo(id, recentVideos().find(v => v.id === id) || {});   // what we remember, straight away
+    drawCommentsCard();
+  }
+  const d = (await videoDetails(id)) || (await videoInfo(id));
   if (currentVideoId() !== id) return;                // you've switched video since
-  if (fresh.title) { drawInfo(id, fresh); remember(id, fresh); }
+  if (d.title) { drawInfo(id, d); remember(id, d); }
+  related = (d.related || []).filter(r => isVideoId(r.id) && r.id !== id);
+  showList();
+  previewComments(id, d.mirror);
 }
 function drawInfo(id, info) {
+  const watch = 'https://www.youtube.com/watch?v=' + id;
   $('vTitle').textContent = info.title || 'YouTube video';
+  const stats = [info.views ? count(info.views) + ' views' : '', info.when ? ago(info.when) : ''].filter(Boolean).join(' · ');
+  $('vMeta').innerHTML = esc(stats) + (info.description ? '<b>...more</b>' : '');
+  $('vMeta').style.display = stats || info.description ? '' : 'none';
+  $('vAvatar').innerHTML = avatarHtml(info.author || 'YouTube', info.avatar);
   $('vAuthor').textContent = info.author || 'YouTube';
-  $('vAvatar').textContent = (info.author || 'Y').trim().charAt(0).toUpperCase();
-  $('vOpen').href = 'https://www.youtube.com/watch?v=' + id;
+  $('vSubs').textContent = info.subs ? info.subs + ' subscribers' : '';
+  $('subBtn').href = info.channel ? info.channel + '?sub_confirmation=1' : watch;
+  $('likePill').href = watch;
+  $('vLikes').textContent = count(info.likes) || 'Like';
+  $('vOpen').href = watch;
+  $('descStats').textContent = [info.views ? info.views.toLocaleString('en') + ' views' : '',
+    info.when ? new Date(info.when).toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric' }) : ''].filter(Boolean).join(' · ');
+  $('descText').innerHTML = linkify(info.description || '');
 }
+// Just the title and channel, straight from YouTube (when no server answers).
 async function videoInfo(id) {
   try {
-    const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id));
-    if (!r.ok) return {};
-    const j = await r.json();
-    return { title: j.title || '', author: j.author_name || '' };
+    const j = await getJSON('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id));
+    return { title: j.title || '', author: j.author_name || '',
+      channel: /^https:\/\/www\.youtube\.com\/[\w@.\/-]+$/.test(j.author_url || '') ? j.author_url : '' };
   } catch (e) { return {}; }
 }
 
-// "Recent videos": every link you've played, newest first (up to 15).
+/* COMMENTS
+   The first page of comments loads with the video, for the count and the
+   top comment on the closed box. Tap the box to read them all (more load as
+   you scroll down), and "N replies" under a comment to read its replies. */
+let comments = null;        // { id, mirror, list, next, total, loading, failed }
+
+// One page of comments (or of a comment's replies, with that comment's "token").
+function commentPage(m, id, token) {
+  if (m.kind === 'piped') {
+    return getJSON(m.base + (token ? '/nextpage/comments/' + id + '?nextpage=' + encodeURIComponent(token) : '/comments/' + id))
+      .then(j => ({ total: +j.commentCount || 0, list: (j.comments || []).map(fromPipedComment), next: j.nextpage || '' }));
+  }
+  return getJSON(m.base + '/api/v1/comments/' + id + (token ? '?continuation=' + encodeURIComponent(token) : '?sort_by=top'))
+    .then(j => ({ total: +j.commentCount || 0, list: (j.comments || []).map(fromInvidiousComment), next: j.continuation || '' }));
+}
+function fromInvidiousComment(c) {
+  return {
+    author: c.author || '', avatar: picture(c.authorThumbnail || ((c.authorThumbnails || []).slice(-1)[0] || {}).url),
+    text: c.content || htmlToText(c.contentHtml || ''), likes: +c.likeCount || 0, age: c.publishedText || '',
+    pinned: !!c.isPinned, owner: !!c.authorIsChannelOwner, hearted: !!c.creatorHeart,
+    replies: (c.replies && +c.replies.replyCount) || 0, repliesToken: (c.replies && c.replies.continuation) || ''
+  };
+}
+function fromPipedComment(c) {
+  return {
+    author: c.author || '', avatar: picture(c.thumbnail), text: htmlToText(c.commentText || ''),
+    likes: +c.likeCount || 0, age: c.commentedTime || '',
+    pinned: !!c.pinned, owner: !!c.channelOwner, hearted: !!c.hearted,
+    replies: +c.replyCount > 0 ? +c.replyCount : 0, repliesToken: c.repliesPage || ''
+  };
+}
+
+// Load the first page of comments for a video ("again" = after a failure).
+async function previewComments(id, mirror, again) {
+  if (comments && comments.id === id && !(again && comments.failed)) { drawCommentsCard(); return; }
+  const c = comments = { id, mirror: null, list: [], next: '', total: 0, loading: true, failed: false };
+  drawCommentsCard(); drawCommentList();
+  const page = await fromAnyMirror(async m => Object.assign(await commentPage(m, id, ''), { mirror: m }), mirror);
+  if (comments !== c) return;                         // switched video since
+  c.loading = false;
+  if (page) Object.assign(c, { mirror: page.mirror, list: page.list, next: page.next, total: page.total });
+  else c.failed = true;
+  drawCommentsCard(); drawCommentList();
+}
+// The closed comments box: how many, and the top comment.
+function drawCommentsCard() {
+  const c = comments;
+  $('cCount').textContent = $('cCount2').textContent = c ? count(c.total) : '';
+  const top = c && c.list[0];
+  $('cPreview').innerHTML = !c || c.loading ? 'Loading…'
+    : top ? '<span class="cAv">' + avatarHtml(top.author, top.avatar) + '</span><span class="t">' + esc(top.text) + '</span>'
+    : c.failed ? 'Couldn’t load the comments. Tap to try again.'
+    : 'No comments.';
+}
+// One comment. "k" is its place in the list (top-level comments only, for replies).
+function commentHtml(c, k) {
+  return '<div class="cmt"><span class="cAv">' + avatarHtml(c.author, c.avatar) + '</span><div class="cBody">' +
+    (c.pinned ? '<div class="cPin">📌 Pinned</div>' : '') +
+    '<div class="cTop">' + (c.owner ? '<span class="own">' + esc(c.author) + '</span>' : esc(c.author)) + (c.age ? ' · ' + esc(c.age) : '') + '</div>' +
+    '<div class="cText">' + linkify(c.text) + '</div>' +
+    '<div class="cActs"><span>👍 ' + count(c.likes) + '</span><span>👎</span>' + (c.hearted ? '<span>❤️</span>' : '') + '</div>' +
+    (k !== undefined && c.replies && c.repliesToken
+      ? '<button class="cReplies" data-k="' + k + '">▾ ' + repliesLabel(c) + '</button><div class="replyList"></div>' : '') +
+    '</div></div>';
+}
+function repliesLabel(c) { return c.replies.toLocaleString('en') + (c.replies === 1 ? ' reply' : ' replies'); }
+
+// The open comments list. New comments are added at the end, so replies you've
+// opened stay open.
+function drawCommentList() {
+  const c = comments, list = $('cList');
+  if (!c) return;
+  if (list.dataset.of !== String(c.id) || +list.dataset.n > c.list.length) { list.innerHTML = ''; list.dataset.of = c.id; list.dataset.n = 0; }
+  const shown = +list.dataset.n;
+  list.insertAdjacentHTML('beforeend', c.list.slice(shown).map((x, i) => commentHtml(x, shown + i)).join(''));
+  list.dataset.n = c.list.length;
+  const note = $('cNote');
+  note.innerHTML = c.loading ? 'Loading comments…'
+    : c.failed ? 'Couldn’t load the comments right now. <a href="https://www.youtube.com/watch?v=' + c.id + '" target="_blank" rel="noopener">Read them in YouTube</a>'
+    : !c.list.length ? 'No comments.' : '';
+  note.style.display = note.innerHTML ? '' : 'none';
+  $('cMore').style.display = c.next && !c.loading ? '' : 'none';
+}
+// The next page of comments (scrolling near the end, or "Show more comments").
+async function moreComments(byTap) {
+  const c = comments;
+  if (!c || c.loading || !c.next || (c.stuck && !byTap)) return;
+  c.loading = true; drawCommentList();
+  try {
+    const page = await commentPage(c.mirror, c.id, c.next);
+    if (comments !== c) return;
+    c.list.push(...page.list);
+    c.next = page.next;
+    c.stuck = false;
+  } catch (e) {
+    c.stuck = true;                                   // stop loading by itself; a tap tries again
+  }
+  c.loading = false;
+  drawCommentList();
+}
+// "N replies" under a comment: load them (first tap), then show/hide them.
+// "token" = load the next lot of replies ("Show more replies").
+async function loadReplies(btn, token) {
+  const c = comments, item = c && c.list[+btn.dataset.k];
+  if (!item || btn.dataset.busy) return;
+  const box = btn.nextElementSibling;
+  if (!token) {
+    if (btn.dataset.loaded) {                         // already loaded: just show or hide them
+      const hide = box.style.display !== 'none';
+      box.style.display = hide ? 'none' : '';
+      btn.textContent = (hide ? '▾ ' : '▴ ') + repliesLabel(item);
+      return;
+    }
+    token = item.repliesToken;
+  }
+  btn.dataset.busy = '1';
+  box.querySelectorAll('.moreReplies').forEach(b => b.remove());
+  box.insertAdjacentHTML('beforeend', '<div class="cTop waitReplies">Loading replies…</div>');
+  let page = null;
+  try { page = await commentPage(c.mirror, c.id, token); } catch (e) {}
+  box.querySelectorAll('.waitReplies').forEach(b => b.remove());
+  delete btn.dataset.busy;
+  if (!page) {
+    box.insertAdjacentHTML('beforeend', '<button class="moreReplies" data-token="' + esc(token) + '">Couldn’t load them. Tap to try again</button>');
+    return;
+  }
+  btn.dataset.loaded = '1';
+  btn.textContent = '▴ ' + repliesLabel(item);
+  box.insertAdjacentHTML('beforeend', page.list.map(r => commentHtml(r)).join('') +
+    (page.next ? '<button class="moreReplies" data-token="' + esc(page.next) + '">Show more replies</button>' : ''));
+}
+
+// Open the comments (in place of everything under the player), and close them.
+let watchScroll = 0;        // where you'd scrolled to before opening them
+function openComments() {
+  if (!comments) return;
+  watchScroll = reader.scrollTop;
+  document.body.classList.add('commentsOpen');
+  reader.scrollTop = 0;
+  drawCommentList();
+  if (comments.failed) previewComments(comments.id, null, true);   // try again
+}
+function closeComments() {
+  document.body.classList.remove('commentsOpen');
+  reader.scrollTop = watchScroll;
+}
+
+/* MORE VIDEOS: "Up next" (the videos suggested for this one) or "Watched"
+   (every link you've played here, newest first, up to 15). */
+let related = [];           // the suggested videos for the video that's on
+let listChoice = 'next';    // the chip you last tapped
 function recentVideos() { try { return JSON.parse(localStorage.getItem('ytHistory')) || []; } catch (e) { return []; } }
 function remember(id, info) {
   const list = recentVideos();
@@ -895,22 +1305,28 @@ function remember(id, info) {
   const rest = list.filter(v => v.id !== id);
   rest.unshift({ id, title: info.title || old.title || '', author: info.author || old.author || '' });
   localStorage.setItem('ytHistory', JSON.stringify(rest.slice(0, 15)));
-  showRecent();
+  showList();
 }
-function showRecent() {
-  const list = recentVideos().filter(v => v.id !== currentVideoId());
-  $('recentHead').style.display = list.length ? '' : 'none';
-  $('recentList').innerHTML = list.map(v => `
-    <button class="recent" data-id="${v.id}">
-      <img src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg" alt="" loading="lazy">
-      <span><b>${esc(v.title || 'YouTube video')}</b><small>${esc(v.author || 'YouTube')}</small></span>
+function showList() {
+  const watched = recentVideos().filter(v => isVideoId(v.id) && v.id !== currentVideoId());
+  const which = listChoice === 'watched' && watched.length || !related.length ? 'watched' : 'next';
+  const items = which === 'next' ? related : watched;
+  document.querySelectorAll('#listChips button').forEach(b => {
+    b.classList.toggle('on', b.dataset.list === which);
+    b.style.display = (b.dataset.list === 'next' ? related : watched).length ? '' : 'none';
+  });
+  $('listChips').style.display = items.length ? '' : 'none';
+  $('videoList').innerHTML = items.map(v => `
+    <button class="vcard" data-id="${v.id}">
+      <span class="thumb"><img src="https://i.ytimg.com/vi/${v.id}/hq720.jpg" alt="" loading="lazy" onerror="this.onerror=null;this.src=this.src.replace('hq720','hqdefault')">${v.length ? '<i>' + lengthText(v.length) + '</i>' : ''}</span>
+      <span class="vtext"><b>${esc(v.title || 'YouTube video')}</b><small>${esc([v.author || 'YouTube', v.views ? v.views + ' views' : '', v.age].filter(Boolean).join(' · '))}</small></span>
     </button>`).join('');
 }
 
-// Play a video: from the link box, or from Recent videos.
-function playVideo(id) {
+// Play a video: from the link box, or from the list of videos.
+function playVideo(id, info) {
   localStorage.setItem('yt', 'https://www.youtube.com/watch?v=' + id);
-  remember(id, {});
+  remember(id, info || {});
   document.body.classList.remove('editingLink');
   $('linkBox').value = '';
   $('linkMsg').style.display = 'none';
@@ -918,24 +1334,14 @@ function playVideo(id) {
   reader.scrollTop = 0;
 }
 
-/* FULL SCREEN (the page's own, see the CSS for why).
-   It's on when you tap "⛶ Full screen", or automatically while the phone is
-   sideways in Video mode. Tap ✕ to leave. */
-let theaterByButton = false;   // you tapped "⛶ Full screen"
-let theaterDismissed = false;  // you tapped ✕ while the phone was sideways
-const sideways = matchMedia('(orientation: landscape)');
-function updateTheater() {
-  const can = mode === 'video' && !!currentVideoId();
-  const on = can && (theaterByButton || (sideways.matches && !theaterDismissed));
-  document.body.classList.toggle('theater', on);
-  document.body.classList.toggle('rotated', on && !sideways.matches);
-  // In full screen the REC badge and messages move onto the video, so they
-  // turn with it. Afterwards they go back to their usual place.
-  const home = on ? player : document.body;
-  [recBadge, toastEl].forEach(el => { if (el.parentNode !== home) home.appendChild(el); });
+// Share the video's YouTube link (iPhone's share menu, or copy it).
+function shareVideo() {
+  const id = currentVideoId();
+  if (!id) return;
+  const url = 'https://www.youtube.com/watch?v=' + id;
+  if (navigator.share && !sharing) navigator.share({ title: $('vTitle').textContent, url }).catch(() => {});
+  else if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('Link copied'), () => toast(url));
 }
-// Turning the phone starts fresh: sideways = full screen, upright = normal.
-sideways.addEventListener('change', () => { theaterByButton = false; theaterDismissed = false; updateTheater(); });
 
 /* ---- 4. VIDEO MODE OR TEXT MODE ----
    Remembered on this phone. Text mode pauses the video. */
@@ -946,7 +1352,7 @@ function setMode(m) {
   document.body.classList.toggle('mode-video', mode === 'video');
   document.body.classList.toggle('mode-text', mode === 'text');
   document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
-  if (mode === 'text') { pauseVideo(); theaterByButton = false; }
+  if (mode === 'text') pauseVideo();
   else stopAutoScroll();
   reader.scrollTop = 0;
   loadVideo();
@@ -970,6 +1376,7 @@ async function openCamera() {
   // app's own standard setting. (Held upright it comes out 1080 wide × 1920 tall.)
   stream = await askForCamera({ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: facing });
   await applyZoom();
+  watchForPauses(stream);
   preview.srcObject = stream;                         // plug it into the invisible box
   log('camera on: ' + cameraReport());                // private note, for tracking down problems
   return stream;
@@ -1075,7 +1482,7 @@ function cameraReport() {
 // The sentence to show when the camera wouldn't switch on.
 function cameraProblem(e) {
   return (e && e.message === 'timeout')
-    ? "The camera didn't start. Keep this page on screen, and allow the camera if iPhone asks."
+    ? "The camera didn't start. Keep this page on screen (not a video in full screen), and allow the camera if iPhone asks."
     : BLOCKED;
 }
 
@@ -1083,6 +1490,31 @@ function cameraProblem(e) {
 function cameraLive() {
   return !!stream && stream.getVideoTracks().some(t => t.readyState === 'live');
 }
+
+/* If iPhone pauses the camera or microphone during a recording (it does
+   while the page is covered, e.g. by a video in iPhone's own full screen),
+   count how long for. The clip is then marked ⚠ under 🎞, and the private
+   log says what happened. */
+let pausedSince = 0;        // when the current pause began (0 = not paused)
+function watchForPauses(s) {
+  s.getTracks().forEach(t => {
+    t.addEventListener('mute', () => {
+      log((t.kind === 'video' ? 'camera' : 'microphone') + ' paused by iPhone (page ' + document.visibilityState + ')');
+      if (recording && !pausedSince) pausedSince = Date.now();
+    });
+    t.addEventListener('unmute', () => {
+      log((t.kind === 'video' ? 'camera' : 'microphone') + ' back on');
+      endPause();
+    });
+  });
+}
+function endPause() {
+  if (pausedSince && recorder) recorder.pausedMs = (recorder.pausedMs || 0) + Date.now() - pausedSince;
+  pausedSince = 0;
+}
+document.addEventListener('visibilitychange', () => {
+  if (recording || starting) log('page ' + document.visibilityState + ' while recording');
+});
 
 // Switch the camera (and microphone) off.
 function closeCamera() {
@@ -1125,6 +1557,12 @@ function pickFormat() {
 // sentence saying why not (the Action Button's banner shows that sentence).
 async function start() {
   if (recording || starting) return '';               // already going
+  // iPhone won't switch the camera on while the page is covered (a video in
+  // iPhone's own full screen, another app, or another tab), so say so at once.
+  if (document.hidden) {
+    log('press while the page was covered');
+    return "The Reader page is covered (a video in iPhone's full screen, another app or another tab), and iPhone won't switch the camera on then. Leave full screen, then press again.";
+  }
   starting = true;
   showErr('');                                        // clear any old error
   clipsScreen.classList.remove('open');               // get the clips screen out of the way
@@ -1139,7 +1577,7 @@ async function start() {
     closeCamera();
     showErr(cameraProblem(e));
     return e && e.message === 'timeout'
-      ? "The camera didn't switch on. iPhone only allows it while the Reader page is on screen (use the page's own ⛶ Full screen, not YouTube's). Then press again."
+      ? "The camera didn't switch on. iPhone only allows it while the Reader page is on screen, not while a video is in iPhone's full screen. Leave full screen, then press again."
       : "Couldn't switch the camera on. Open the page and tap Start once to allow the camera.";
   }
   starting = false;
@@ -1165,6 +1603,8 @@ async function start() {
   // When recording stops, run finish() to glue the pieces into one file.
   rec.onstop = () => finish(rec, pieces);
   rec.camera = cameraName();                          // e.g. "Back 1×", saved with the clip
+  rec.pausedMs = 0;                                   // time iPhone paused the camera (see watchForPauses)
+  pausedSince = 0;
   rec.start(1000);                                    // save a piece every second
   recorder = rec;
   log('recording: ' + (rec.mimeType || '?') + ' · ' + Math.round((rec.videoBitsPerSecond || 0) / 1e6) + ' Mbps');
@@ -1191,6 +1631,7 @@ function stop() {
   stopTimer();
   stopAutoScroll();
   noteVideo();
+  endPause();
   recorder.takeNo = ++takes;                          // this clip's number
   recorder.lengthMs = Date.now() - startTime;         // how long it ran
   if (recorder.state !== 'inactive') recorder.stop(); // triggers finish()
@@ -1228,7 +1669,7 @@ function store(mode, job) {
 }
 // The details we keep about a clip (everything but the video itself).
 function metaOf(c) {
-  return { id: c.id, no: c.no, name: c.name, type: c.type, length: c.length, camera: c.camera, at: c.at, saved: !!c.saved, savedAt: c.savedAt || 0, size: c.size };
+  return { id: c.id, no: c.no, name: c.name, type: c.type, length: c.length, camera: c.camera, paused: c.paused || 0, at: c.at, saved: !!c.saved, savedAt: c.savedAt || 0, size: c.size };
 }
 
 // FINISH: runs once a recorder has bundled all its pieces into one file.
@@ -1239,7 +1680,7 @@ async function finish(rec, pieces) {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   const name = `recording-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${type === 'video/mp4' ? 'mp4' : 'webm'}`;
-  const clip = { id: d.getTime(), no: rec.takeNo, blob, name, type, length: rec.lengthMs, camera: rec.camera, at: d.getTime(), size: blob.size, saved: false };
+  const clip = { id: d.getTime(), no: rec.takeNo, blob, name, type, length: rec.lengthMs, camera: rec.camera, paused: rec.pausedMs || 0, at: d.getTime(), size: blob.size, saved: false };
   // The file the save buttons hand to iPhone, made now so a tap has nothing to wait for.
   clip.file = new File([blob], name, { type });
   clips.push(clip);
@@ -1371,7 +1812,8 @@ function showClips() {
   $('clipList').innerHTML = clips.slice().reverse().map(c => `
     <div class="clipRow">
       <div class="clipInfo"><b>Clip ${c.no}</b> · ${clock(c.length)} ${c.saved ? '<span class="ok">✓ saved</span>' : ''}
-        <small>${esc(c.camera || '')} · ${time(c.at)} · ${Math.max(1, Math.round((c.size || 0) / 1048576))} MB</small></div>
+        <small>${esc(c.camera || '')} · ${time(c.at)} · ${Math.max(1, Math.round((c.size || 0) / 1048576))} MB</small>
+        ${c.paused >= 1000 ? `<small class="warn">⚠ Camera paused ${clock(c.paused)} (page was covered)</small>` : ''}</div>
       <button class="oneBtn" data-id="${c.id}"${sharing ? ' disabled' : ''}>${sharing === c.id ? '…' : 'Photos'}</button>
       <a class="filesLink" data-id="${c.id}" href="#">Files</a>
       <button class="delBtn" data-id="${c.id}" aria-label="Delete clip ${c.no}">✕</button>
@@ -1596,7 +2038,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) list
 async function answerPress() {
   // Switching the camera on can take a moment, longer than the Shortcut
   // waits. So say so straight away, then report the result.
-  if (!recording && !starting) {
+  if (!recording && !starting && !document.hidden) {
     fetch(RELAY + lineCode + '_r', { method: 'POST', body: '◌ Switching the camera on…' }).catch(() => {});
   }
   let result;
@@ -1630,8 +2072,10 @@ function toast(text) {
 async function remoteToggle() {
   if (starting) return { ok: false, text: 'Still starting. Press again in a second.' };
   if (recording) {
+    const paused = (endPause(), recorder.pausedMs || 0);
     const n = stop();
-    return { ok: true, text: '■ Stopped. Clip ' + n + ' kept, camera and mic off.' };
+    return { ok: true, text: '■ Stopped. Clip ' + n + ' kept, camera and mic off.' +
+      (paused >= 1000 ? ' ⚠ iPhone paused the camera for ' + clock(paused) + ' while the page was covered.' : '') };
   }
   const problem = await start();
   if (problem) return { ok: false, text: '⚠️ ' + problem };
@@ -1671,11 +2115,28 @@ $('modeSeg').addEventListener('click', e => {                              // Vi
 });
 
 // Video mode's buttons.
-$('fullBtn').addEventListener('click', () => { theaterByButton = true; updateTheater(); });
-$('exitTheater').addEventListener('click', () => {
-  theaterByButton = false;
-  if (sideways.matches) theaterDismissed = true;      // stay out until the phone turns again
-  updateTheater();
+$('vMeta').addEventListener('click', () => document.body.classList.toggle('descOpen'));   // "...more"
+$('descLess').addEventListener('click', () => { document.body.classList.remove('descOpen'); reader.scrollTop = 0; });
+$('shareBtn').addEventListener('click', shareVideo);
+$('commentsCard').addEventListener('click', openComments);
+$('closeComments').addEventListener('click', closeComments);
+$('cMore').addEventListener('click', () => moreComments(true));
+// Scrolling near the end of the comments loads the next lot by itself.
+new IntersectionObserver(seen => {
+  if (seen.some(e => e.isIntersecting) && document.body.classList.contains('commentsOpen')) moreComments();
+}, { root: reader, rootMargin: '600px' }).observe($('cMore'));
+$('cList').addEventListener('click', e => {
+  const more = e.target.closest('.moreReplies');
+  if (more) { loadReplies(more.parentNode.previousElementSibling, more.dataset.token); return; }
+  const replies = e.target.closest('.cReplies');
+  if (replies) { loadReplies(replies); return; }
+  if (e.target.closest('a')) return;                  // a link in a comment: let it open
+  const text = e.target.closest('.cText');
+  if (text) text.classList.toggle('open');            // tap a long comment to read all of it
+});
+$('listChips').addEventListener('click', e => {      // Up next / Watched
+  const b = e.target.closest('button');
+  if (b) { listChoice = b.dataset.list; showList(); }
 });
 $('changeBtn').addEventListener('click', () => {
   document.body.classList.toggle('editingLink');
@@ -1692,9 +2153,9 @@ $('linkForm').addEventListener('submit', e => {
   $('linkBox').blur();                                // put the keyboard away
   playVideo(id);
 });
-$('recentList').addEventListener('click', e => {
-  const b = e.target.closest('.recent');
-  if (b) playVideo(b.dataset.id);
+$('videoList').addEventListener('click', e => {
+  const b = e.target.closest('.vcard');
+  if (b) playVideo(b.dataset.id, related.find(v => v.id === b.dataset.id));
 });
 
 // The clips screen's buttons.
