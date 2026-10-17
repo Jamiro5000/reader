@@ -966,7 +966,9 @@ async function openCamera() {
   // with several back lenses, Safari's back camera is the same combined camera
   // the Camera app uses, so 0.5×, 1× and 2× are all just a zoom setting on it
   // (see applyZoom below). One camera, opened once.
-  stream = await askForCamera({ width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: facing });
+  // 1920×1080 at 30 frames a second: "1080p HD at 30 fps", the iPhone Camera
+  // app's own standard setting. (Held upright it comes out 1080 wide × 1920 tall.)
+  stream = await askForCamera({ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: facing });
   await applyZoom();
   preview.srcObject = stream;                         // plug it into the invisible box
   log('camera on: ' + cameraReport());                // private note, for tracking down problems
@@ -1067,7 +1069,7 @@ function cameraReport() {
   const s = track.getSettings ? track.getSettings() : {};
   const r = (track.getCapabilities ? track.getCapabilities() : {}).zoom;
   return `${track.label || '(no name)'} · ${cameraName()} · zoom ${s.zoom === undefined ? 'n/a' : s.zoom}` +
-    (r ? ` (range ${r.min}–${r.max})` : ' (no zoom)') + ` · ${s.width}x${s.height} · ${track.readyState}${track.muted ? ' muted' : ''}`;
+    (r ? ` (range ${r.min}–${r.max})` : ' (no zoom)') + ` · ${s.width}x${s.height} · ${s.frameRate ? Math.round(s.frameRate) + 'fps' : '?fps'} · ${track.readyState}${track.muted ? ' muted' : ''}`;
 }
 
 // The sentence to show when the camera wouldn't switch on.
@@ -1144,9 +1146,11 @@ async function start() {
   document.body.classList.remove('starting');
 
   const mimeType = pickFormat();
-  // 5 megabits a second: sharp at this size, and about half the space of
-  // Safari's own setting (about 38 MB per minute), so clips save quicker.
-  const opts = { videoBitsPerSecond: 5000000, audioBitsPerSecond: 128000 };
+  // Picture quality: 16 megabits a second. Safari records in the simplest
+  // kind of H.264 (less efficient than the Camera app's own format), so it
+  // needs this much to look as sharp as a normal 1080p Camera-app video.
+  // About 120 MB per minute. Sound: 192 kilobits a second.
+  const opts = { videoBitsPerSecond: 16000000, audioBitsPerSecond: 192000 };
   if (mimeType) opts.mimeType = mimeType;
   let rec;
   try {
@@ -1163,6 +1167,7 @@ async function start() {
   rec.camera = cameraName();                          // e.g. "Back 1×", saved with the clip
   rec.start(1000);                                    // save a piece every second
   recorder = rec;
+  log('recording: ' + (rec.mimeType || '?') + ' · ' + Math.round((rec.videoBitsPerSecond || 0) / 1e6) + ' Mbps');
 
   recording = true;
   document.body.classList.add('recording');           // flips CSS into "recording" look
@@ -1294,9 +1299,9 @@ function showClipCount() {
        and ignores taps until the menu is up.
      • Only one menu at a time. If iPhone refuses, the reason shows on this
        screen and the next tap tries again.
-   Very big batches can overwhelm the menu, so at most about 400 MB go at
-   once ("Save 4 of 9"); the rest go on the next tap. */
-const SHARE_LIMIT = 400 * 1024 * 1024;
+   Very big batches can overwhelm the menu, so at most about 600 MB (about
+   5 minutes of video) go at once ("Save 4 of 9"); the rest go on the next tap. */
+const SHARE_LIMIT = 600 * 1024 * 1024;
 let sharing = null;         // 'all' or a clip id, while a save menu is opening (or open)
 
 // The waiting clips that go in the next "Save all" (oldest first).
