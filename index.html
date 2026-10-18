@@ -12,8 +12,9 @@
            the title, views, likes, description, comments and more videos.
          • Text mode: just your script, to read (it can scroll by itself).
     2. Films you (or your whiteboard) using the phone's camera. The camera and
-       microphone are ONLY switched on while you're recording, never in
-       between, to save battery.
+       microphone are switched on while you're recording, and while a YouTube
+       video plays (so a recording can start even in full screen). The rest
+       of the time they're off, to save battery.
     3. Keeps every clip safely on the phone until you save them all to Photos
        with one tap (the 🎞 button).
 
@@ -113,9 +114,11 @@
        even when you've swiped the control bar away.
          • grey "Starting camera…"               = the camera is switching on
          • red, throbbing "● REC 0:12 · Back 1×"  = recording right now
+         • green dot, "Camera ready · Back 1×"   = camera on, NOT recording,
+           ready to start straight away (while a YouTube video plays)
        "Back 1×" is the camera that's really on and its zoom, so you can check
        it without a camera picture on screen.
-       It's hidden when you're not recording (the camera is off then).
+       It's hidden when the camera is off.
        ======================================================================== */
     #recBadge {
       position: fixed;
@@ -133,7 +136,7 @@
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
     }
-    body.recording #recBadge, body.starting #recBadge { display: flex; }
+    body.recording #recBadge, body.starting #recBadge, body.standby #recBadge { display: flex; }
     #recBadge .dot {
       width: 9px; height: 9px; border-radius: 50%;
       background: var(--rec);
@@ -141,6 +144,8 @@
     }
     body.starting #recBadge { color: var(--muted); font-weight: 500; }
     body.starting #recBadge .dot { background: var(--muted); animation: none; }  /* grey, still */
+    body.standby #recBadge { color: var(--muted); font-weight: 500; }
+    body.standby #recBadge .dot { background: #4ade80; animation: none; }        /* green, still */
     @keyframes pulse {
       0%   { opacity: 1; }
       50%  { opacity: .35; }
@@ -189,7 +194,7 @@
       background: var(--accent); color: #fff;
       display: grid; place-items: center; font-size: 13px;
     }
-    body.recording #logo, body.starting #logo { visibility: hidden; }   /* the REC badge sits there */
+    body.recording #logo, body.starting #logo, body.standby #logo { visibility: hidden; }   /* the badge sits there */
 
     /* "Video" and "Text": two pill buttons, the chosen one white, like
        YouTube's topic chips. */
@@ -490,6 +495,8 @@
 
     .row { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
     .row label { font-size: 15px; }
+    label.row { font-size: 15px; margin: 14px 0 6px; }
+    label.row input { width: 22px; height: 22px; flex: 0 0 auto; }
     input[type=range] { flex: 1; }
 
     .fullbtn { width: 100%; background: var(--accent); font-weight: 600; margin-top: 10px; }
@@ -734,20 +741,25 @@
       <div id="actionSection">
         <h2>Action Button</h2>
         <p id="remoteStatus">Checking…</p>
-        <p><b>Press once:</b> the camera and microphone switch on and recording
-          starts (the top-left badge shows <b>● REC</b>). <b>Press again:</b>
-          recording stops and the camera and microphone switch off. A banner
-          confirms each press about two seconds later.</p>
-        <p><b>Keep this page on screen.</b> iPhone only lets a page use the
-          camera while you can see the page. A video in iPhone's own full
-          screen covers the page, so iPhone pauses the camera and microphone
-          then: a press can't start a recording, and if you're already
-          recording, that part of the clip freezes and goes quiet (the clip is
-          marked ⚠ under 🎞). Leave full screen before you press.</p>
+        <p><b>Press once:</b> recording starts (the top-left badge shows
+          <b>● REC</b>). <b>Press again:</b> recording stops. A banner confirms
+          each press about two seconds later.</p>
+        <p><b>Full screen:</b> use the video's own full-screen button.
+          Recording keeps going in full screen, and presses start and stop it
+          there too.</p>
+        <label class="row"><input type="checkbox" id="standbyBox" />
+          <span><b>Camera ready while a video plays</b></span></label>
+        <p>iPhone won't switch a camera on while a video is full screen. So
+          while a YouTube video plays, the camera and microphone switch on
+          (without recording) and a press starts recording straight away. The
+          badge shows <b>Camera ready</b>. They switch off 3 minutes after the
+          video stops, and in Text mode. Turn this off to save battery; then
+          start recording before you go full screen.</p>
         <p><b>Saving:</b> clips wait under <b>🎞</b> in the bar. When you're
           done, tap 🎞 → <b>Save all to Photos</b>.</p>
-        <p><b>Tip:</b> in Safari tap <b>aA → Website Settings</b> and set Camera
-          and Microphone to <b>Allow</b>, so iPhone never stops to ask.</p>
+        <p><b>Important:</b> in Safari tap <b>aA → Website Settings</b> and set
+          Camera and Microphone to <b>Allow</b>, so iPhone never stops to ask
+          (it can't ask while a video is full screen).</p>
         <p><b>One-time setup:</b> open your setup link on this phone once, add
           the <b>Record</b> shortcut, then in iPhone <b>Settings → Action
           Button</b> choose <b>Shortcut → Record</b>.</p>
@@ -921,7 +933,9 @@ function showVideo(id) {
       host: 'https://www.youtube-nocookie.com',
       // playsinline: play on the page until you choose full screen yourself.
       // rel: 0 keeps the suggestions at the end to the same channel.
-      playerVars: { playsinline: 1, rel: 0 }
+      playerVars: { playsinline: 1, rel: 0 },
+      // Tells the page when the video plays or stops (for "Camera ready").
+      events: { onStateChange: e => videoStateChanged(e.data) }
     });
   }).catch(() => {
     ytPlayer = { plain: true };
@@ -1352,7 +1366,7 @@ function setMode(m) {
   document.body.classList.toggle('mode-video', mode === 'video');
   document.body.classList.toggle('mode-text', mode === 'text');
   document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
-  if (mode === 'text') pauseVideo();
+  if (mode === 'text') { pauseVideo(); standbyOff(); }   // no camera on standby in Text mode
   else stopAutoScroll();
   reader.scrollTop = 0;
   loadVideo();
@@ -1361,46 +1375,69 @@ function setMode(m) {
 /* ---- 5. THE CAMERA ----
 
    openCamera() turns the camera on using whichever side ('facing') is selected,
-   and plugs it into the invisible camera box. It only runs when a recording
-   starts, and closeCamera() runs as soon as it stops, so the camera and
-   microphone are never on in between (that's what drains the battery). */
+   and plugs it into the invisible camera box. It runs when a recording
+   starts, or ahead of time while a YouTube video plays (see CAMERA READY
+   below). closeCamera() switches it off. The rest of the time the camera
+   and microphone are off, because that's what drains the battery. */
+let cameraOpening = null;   // the camera switching on right now (shared, so iPhone is asked only once)
+let streamFacing = '';      // which side the camera that's on is ('user' or 'environment')
+
+// Make sure the camera is on, on the side you picked. If it's already
+// switching on, wait for that instead of asking iPhone twice.
+async function ensureCamera() {
+  for (let tries = 0; tries < 2; tries++) {
+    if (cameraLive() && streamFacing === facing) return stream;
+    if (!cameraOpening) cameraOpening = openCamera().finally(() => { cameraOpening = null; });
+    await cameraOpening;
+  }
+  return stream;
+}
+
 async function openCamera() {
-  // If a camera was already on, switch it off first.
-  if (stream) stream.getTracks().forEach(t => t.stop());
-  stream = null;
+  closeCamera();                                      // a camera already on (other side): off first
+  const side = facing;
   // Ask for a side ("facingMode"), never for a particular lens. On an iPhone
   // with several back lenses, Safari's back camera is the same combined camera
   // the Camera app uses, so 0.5×, 1× and 2× are all just a zoom setting on it
   // (see applyZoom below). One camera, opened once.
   // 1920×1080 at 30 frames a second: "1080p HD at 30 fps", the iPhone Camera
   // app's own standard setting. (Held upright it comes out 1080 wide × 1920 tall.)
-  stream = await askForCamera({ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: facing });
+  // iPhone can be slow to say yes (it waits while it can't ask you), so allow
+  // up to a minute here. A recording only waits 10 seconds of that (see start).
+  stream = await askForCamera({ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: side }, 60000);
+  streamFacing = side;
   await applyZoom();
   watchForPauses(stream);
   preview.srcObject = stream;                         // plug it into the invisible box
   log('camera on: ' + cameraReport());                // private note, for tracking down problems
+  // Arrived after nobody needed it any more (a start that gave up, or the
+  // video stopped)? Switch it straight off again.
+  if (!recording && !starting && !standbyWanted()) { closeCamera(); log('camera not needed any more: off'); }
+  showStandby();
   return stream;
+}
+
+// Wait for something, but give up after "ms" milliseconds.
+function withTimeout(promise, ms) {
+  let timer;
+  const tooSlow = new Promise((_, fail) => { timer = setTimeout(() => fail(new Error('timeout')), ms); });
+  return Promise.race([promise, tooSlow]).finally(() => clearTimeout(timer));
 }
 
 // Ask the browser for a camera + the microphone. The first time, iPhone asks
 // "Allow camera & microphone?" (set them to Allow in Safari's Website Settings
 // and it never asks again).
-async function askForCamera(video) {
+async function askForCamera(video, ms) {
   const ask = navigator.mediaDevices.getUserMedia({ video, audio: true });
-  // Don't wait forever. iPhone holds the camera back while this page isn't on
-  // screen (another app, or a video in iPhone's own full screen). Give up
-  // after 10 seconds so the next press can try again.
-  let timer;
-  const tooSlow = new Promise((_, fail) => { timer = setTimeout(() => fail(new Error('timeout')), 10000); });
+  // Don't wait forever: iPhone holds the camera back while this page isn't on
+  // screen, or while a video is in its full screen and it can't ask you.
   try {
-    return await Promise.race([ask, tooSlow]);
+    return await withTimeout(ask, ms);
   } catch (e) {
     // If the camera does turn up later anyway, switch it straight off, so it's
     // never left on by surprise.
     if (e.message === 'timeout') ask.then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});
     throw e;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -1442,12 +1479,14 @@ function nearestZoom(z) {
   return [0.5, 1, 2].reduce((best, n) => Math.abs(n - z) < Math.abs(best - z) ? n : best, 1);
 }
 
-// Pick a zoom in Settings. It's used from the next recording.
+// Pick a zoom in Settings. It's used from the next recording (and straight
+// away if the camera is ready).
 function setZoom(z) {
   if (recording || starting) { toast('Stop recording first, then change the zoom.'); return; }
   zoomChoice = z;
   localStorage.setItem('zoom', String(z));
   showZoom();
+  if (stream) applyZoom().then(showStandby);
 }
 
 // Highlight the chosen zoom button in Settings.
@@ -1482,7 +1521,7 @@ function cameraReport() {
 // The sentence to show when the camera wouldn't switch on.
 function cameraProblem(e) {
   return (e && e.message === 'timeout')
-    ? "The camera didn't start. Keep this page on screen (not a video in full screen), and allow the camera if iPhone asks."
+    ? "The camera didn't start. In full screen it has to be ready first (play the video for a moment). Otherwise keep this page on screen, and allow the camera if iPhone asks."
     : BLOCKED;
 }
 
@@ -1492,8 +1531,8 @@ function cameraLive() {
 }
 
 /* If iPhone pauses the camera or microphone during a recording (it does
-   while the page is covered, e.g. by a video in iPhone's own full screen),
-   count how long for. The clip is then marked ⚠ under 🎞, and the private
+   while the page is covered, e.g. by another app or a phone call), count
+   how long for. The clip is then marked ⚠ under 🎞, and the private
    log says what happened. */
 let pausedSince = 0;        // when the current pause began (0 = not paused)
 function watchForPauses(s) {
@@ -1514,6 +1553,8 @@ function endPause() {
 }
 document.addEventListener('visibilitychange', () => {
   if (recording || starting) log('page ' + document.visibilityState + ' while recording');
+  else if (stream) log('page ' + document.visibilityState + ' with the camera ready');
+  if (!document.hidden && videoPlaying) wantStandby();
 });
 
 // Switch the camera (and microphone) off.
@@ -1521,15 +1562,77 @@ function closeCamera() {
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
   preview.srcObject = null;
+  showStandby();
+}
+
+/* CAMERA READY (so you can start recording in full screen)
+   iPhone won't switch a camera on while a video is in its full screen: it
+   holds the request back, because it can't ask you. A camera that's ALREADY
+   on keeps working there. So while a YouTube video plays, the camera and
+   microphone are switched on ahead of time, without recording ("Camera
+   ready" in the badge). A press then only has to start recording, which
+   works in full screen too. After a recording they stay ready for the next
+   one. They switch off 3 minutes after the video stops playing, and in Text
+   mode. The Settings switch "Camera ready while a video plays" turns this off. */
+const STANDBY_GRACE = 3 * 60 * 1000;   // 3 minutes
+let standbyOn = localStorage.getItem('standby') !== 'off';   // the Settings switch
+let standbyTimer = null;    // the countdown to switching the camera off
+let standbyRetryAt = 0;     // after a failed try, don't ask iPhone again before this time
+let videoPlaying = false;   // is the YouTube video playing right now?
+
+// Should the camera stay ready at all? (Video mode, page on screen, switch on.)
+function keepCameraReady() { return standbyOn && mode === 'video' && !document.hidden; }
+// …and right now? (While the video plays, or during the 3-minute countdown.)
+function standbyWanted() { return keepCameraReady() && (videoPlaying || !!standbyTimer); }
+
+// The YouTube player says it's playing (1), loading more (3), paused (2), ended (0)…
+function videoStateChanged(state) {
+  videoPlaying = state === 1 || state === 3;
+  if (videoPlaying) wantStandby();
+  else scheduleStandbyOff();
+}
+async function wantStandby() {
+  clearTimeout(standbyTimer); standbyTimer = null;
+  if (!keepCameraReady() || recording || starting || Date.now() < standbyRetryAt) return;
+  if (cameraLive() && streamFacing === facing) { showStandby(); return; }
+  videoWasPlaying = videoPlaying;
+  try {
+    await ensureCamera();
+  } catch (e) {
+    standbyRetryAt = Date.now() + 2 * 60 * 1000;      // try again in 2 minutes at the earliest
+    log('camera ready: did not switch on (' + (e && (e.name + ' ' + e.message)) + ')');
+    return;
+  }
+  keepVideoPlaying();                                 // in case the microphone paused the video
+  if (!videoPlaying) scheduleStandbyOff();
+  showStandby();
+}
+// Start the 3-minute countdown to switching the camera off (not while recording).
+function scheduleStandbyOff() {
+  if (standbyTimer || recording || starting || !(stream || cameraOpening)) return;
+  standbyTimer = setTimeout(standbyOff, STANDBY_GRACE);
+}
+function standbyOff() {
+  clearTimeout(standbyTimer); standbyTimer = null;
+  if (recording || starting) return;
+  if (stream) { closeCamera(); log('camera ready: off'); }
+  showStandby();
+}
+// The green "Camera ready · Back 1×" badge.
+function showStandby() {
+  const on = !recording && !starting && cameraLive();
+  document.body.classList.toggle('standby', on);
+  if (on) badgeTime.textContent = 'Camera ready · ' + cameraName();
 }
 
 // Switch between front and back. Disabled while recording to keep the file
-// clean. It just changes the choice; the camera turns on at Start.
+// clean. If the camera is ready, it switches to the new side straight away.
 function flip() {
   if (recording || starting) return;                 // safety: don't flip mid-record
   facing = (facing === 'user') ? 'environment' : 'user';
   localStorage.setItem('facing', facing);             // remember it for next time
   showFacing();
+  if (stream || cameraOpening) ensureCamera().catch(() => {});
 }
 // Write "⇄ Front" or "⇄ Back" on the button.
 function showFacing() { flipBtn.textContent = facing === 'user' ? '⇄ Front' : '⇄ Back'; }
@@ -1552,32 +1655,39 @@ function pickFormat() {
   return '';   // if none matched, let the browser decide
 }
 
-// START: switch the camera + microphone on, then record. Used by the Start
-// button AND the Action Button. Gives back '' if filming began, or a short
+// START: switch the camera + microphone on (unless they're ready already),
+// then record. Used by the Start button AND the Action Button. Gives back '' if filming began, or a short
 // sentence saying why not (the Action Button's banner shows that sentence).
 async function start() {
   if (recording || starting) return '';               // already going
-  // iPhone won't switch the camera on while the page is covered (a video in
-  // iPhone's own full screen, another app, or another tab), so say so at once.
+  // iPhone won't record while the page isn't on screen at all (another app,
+  // another Safari tab, or the phone locked), so say so at once. (A video in
+  // full screen doesn't count: the page is still on screen underneath.)
   if (document.hidden) {
-    log('press while the page was covered');
-    return "The Reader page is covered (a video in iPhone's full screen, another app or another tab), and iPhone won't switch the camera on then. Leave full screen, then press again.";
+    log('press while the page was not on screen');
+    return "The Reader page isn't on screen (another app, another tab, or the phone is locked), and iPhone won't record then. Open the page and press again.";
   }
   starting = true;
+  clearTimeout(standbyTimer); standbyTimer = null;    // no switching off mid-recording
   showErr('');                                        // clear any old error
   clipsScreen.classList.remove('open');               // get the clips screen out of the way
-  document.body.classList.add('starting');            // grey "Starting camera…" badge
-  badgeTime.textContent = 'Starting camera…';
+  const ready = cameraLive() && streamFacing === facing;
+  if (!ready) {
+    document.body.classList.add('starting');          // grey "Starting camera…" badge
+    badgeTime.textContent = 'Starting camera…';
+  }
+  showStandby();
   noteVideo();
   try {
-    await openCamera();
+    // Already ready: nothing to wait for. Otherwise wait up to 10 seconds.
+    if (!ready) await withTimeout(ensureCamera(), 10000);
   } catch (e) {
     starting = false;
     document.body.classList.remove('starting');
-    closeCamera();
+    if (!cameraOpening) closeCamera();                // (one still on its way is handled when it arrives)
     showErr(cameraProblem(e));
     return e && e.message === 'timeout'
-      ? "The camera didn't switch on. iPhone only allows it while the Reader page is on screen, not while a video is in iPhone's full screen. Leave full screen, then press again."
+      ? "The camera didn't switch on: iPhone won't switch it on while a video is full screen. Leave full screen and press again. (It's ready by itself once the video has played for a moment.)"
       : "Couldn't switch the camera on. Open the page and tap Start once to allow the camera.";
   }
   starting = false;
@@ -1604,7 +1714,7 @@ async function start() {
   rec.onstop = () => finish(rec, pieces);
   rec.camera = cameraName();                          // e.g. "Back 1×", saved with the clip
   rec.pausedMs = 0;                                   // time iPhone paused the camera (see watchForPauses)
-  pausedSince = 0;
+  pausedSince = stream.getTracks().some(t => t.muted) ? Date.now() : 0;
   rec.start(1000);                                    // save a piece every second
   recorder = rec;
   log('recording: ' + (rec.mimeType || '?') + ' · ' + Math.round((rec.videoBitsPerSecond || 0) / 1e6) + ' Mbps');
@@ -1613,13 +1723,15 @@ async function start() {
   document.body.classList.add('recording');           // flips CSS into "recording" look
   recBtn.textContent = '■ Stop';
   flipBtn.disabled = true;                             // grey out flip while filming
+  showStandby();
   startTimer();
   updateWake();
   keepVideoPlaying();
   return '';
 }
 
-// STOP: end the clip, then switch the camera + microphone off straight away.
+// STOP: end the clip. The camera + microphone switch off straight away, or,
+// in Video mode, stay ready for the next clip (see CAMERA READY).
 // Gives back the clip's number (1, 2, 3…). Nothing pops up: the clip is kept
 // quietly and waits under 🎞.
 function stop() {
@@ -1635,7 +1747,10 @@ function stop() {
   recorder.takeNo = ++takes;                          // this clip's number
   recorder.lengthMs = Date.now() - startTime;         // how long it ran
   if (recorder.state !== 'inactive') recorder.stop(); // triggers finish()
-  closeCamera();                                      // camera light off
+  if (keepCameraReady()) scheduleStandbyOff();        // ready for the next clip (off in 3 min if the video isn't playing)
+  else closeCamera();                                 // camera light off
+  if (videoPlaying) { clearTimeout(standbyTimer); standbyTimer = null; }
+  showStandby();
   updateWake();
   keepVideoPlaying();
   return recorder.takeNo;
@@ -2038,7 +2153,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) list
 async function answerPress() {
   // Switching the camera on can take a moment, longer than the Shortcut
   // waits. So say so straight away, then report the result.
-  if (!recording && !starting && !document.hidden) {
+  if (!recording && !starting && !document.hidden && !(cameraLive() && streamFacing === facing)) {
     fetch(RELAY + lineCode + '_r', { method: 'POST', body: '◌ Switching the camera on…' }).catch(() => {});
   }
   let result;
@@ -2074,7 +2189,7 @@ async function remoteToggle() {
   if (recording) {
     const paused = (endPause(), recorder.pausedMs || 0);
     const n = stop();
-    return { ok: true, text: '■ Stopped. Clip ' + n + ' kept, camera and mic off.' +
+    return { ok: true, text: '■ Stopped. Clip ' + n + ' kept' + (cameraLive() ? ', camera ready for the next one.' : ', camera and mic off.') +
       (paused >= 1000 ? ' ⚠ iPhone paused the camera for ' + clock(paused) + ' while the page was covered.' : '') };
   }
   const problem = await start();
@@ -2204,6 +2319,15 @@ $('saveSettings').addEventListener('click', () => {
 $('fontSize').addEventListener('input', e => {
   reader.style.fontSize = e.target.value + 'px';
   localStorage.setItem('fontSize', e.target.value);
+});
+
+// "Camera ready while a video plays" (remembered on this phone).
+$('standbyBox').checked = standbyOn;
+$('standbyBox').addEventListener('change', e => {
+  standbyOn = e.target.checked;
+  localStorage.setItem('standby', standbyOn ? 'on' : 'off');
+  if (standbyOn) { standbyRetryAt = 0; if (videoPlaying) wantStandby(); }
+  else standbyOff();
 });
 
 // Tap the yellow strip to hide it for this visit.
