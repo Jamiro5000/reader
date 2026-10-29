@@ -58,8 +58,10 @@
       --panel: #1a1d24;   /* the bar at the bottom + pop-up panels */
       --ink: #e8e8ea;     /* main text colour (near white) */
       --muted: #9aa0ac;   /* dimmer grey text for hints */
-      --accent: #3b82f6;  /* the blue used on the main button */
+      --accent: #e5262b;  /* the red used on the main buttons (everything is red, no blue) */
+      --link: #ff6b6b;    /* links and "N replies" in Video mode (light red, easy to read on black) */
       --rec: #ef4444;     /* the red used for the recording dot */
+      --recOn: #8f1116;   /* the Stop button while filming: a darker red, so it looks different from Start */
       --line: #2a2e38;    /* thin border lines */
       --chip: #272727;    /* Video mode's grey "pill" buttons, like YouTube's */
       --vbg: #0f0f0f;     /* Video mode's background, like YouTube's dark mode */
@@ -79,6 +81,7 @@
       color: var(--ink);
       font-family: Georgia, "Times New Roman", serif; /* a serif font reads like an article */
       -webkit-text-size-adjust: 100%;                 /* stop iPhone auto-resizing text */
+      accent-color: var(--accent);                    /* sliders and tick boxes are red, not iPhone's blue */
     }
     body.mode-video, body.mode-video #top { background: var(--vbg); }
 
@@ -281,7 +284,7 @@
     #vChannel { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
     #vAvatar {
       position: relative; flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; overflow: hidden;
-      background: #3f51b5; color: #fff; display: grid; place-items: center; font-weight: 700;
+      background: #b3262b; color: #fff; display: grid; place-items: center; font-weight: 700;
     }
     #vAvatar img, .cAv img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }   /* the photo covers the letter */
     #vChanText { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
@@ -312,7 +315,7 @@
     body.descOpen #descBox { display: block; }
     #descStats { font-weight: 600; margin-bottom: 6px; }
     #descText { white-space: pre-wrap; overflow-wrap: anywhere; }
-    #descText a { color: #3ea6ff; }
+    #descText a { color: var(--link); }
     #descLess { background: none; padding: 10px 0 0; border-radius: 0; color: #f1f1f1; font-size: 14px; font-weight: 600; }
 
     /* Comments, closed: a grey box with how many there are and the top one.
@@ -344,7 +347,7 @@
     .cmt { display: flex; gap: 12px; padding: 12px 0 2px; }
     .cAv {
       position: relative; flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; overflow: hidden;
-      background: #5c6bc0; color: #fff; display: grid; place-items: center;
+      background: #a33a3e; color: #fff; display: grid; place-items: center;
       font-size: 14px; font-weight: 600;
     }
     .replyList .cAv { width: 24px; height: 24px; font-size: 11px; }
@@ -359,12 +362,12 @@
     }
     .cText.open { display: block; }                          /* tapped: the whole comment */
     .cActs { display: flex; gap: 16px; align-items: center; color: #aaa; font-size: 12px; margin-top: 6px; }
-    .cReplies { background: none; padding: 8px 0; border-radius: 0; color: #3ea6ff; font-size: 14px; font-weight: 600; }
+    .cReplies { background: none; padding: 8px 0; border-radius: 0; color: var(--link); font-size: 14px; font-weight: 600; }
     .cReplies:active { transform: none; }
     #cMore, .moreReplies { display: block; margin: 10px auto; background: var(--chip); color: #f1f1f1; padding: 9px 16px; border-radius: 18px; font-size: 14px; font-weight: 600; }
-    .moreReplies { margin: 4px 0 8px; background: none; color: #3ea6ff; padding: 6px 0; }
+    .moreReplies { margin: 4px 0 8px; background: none; color: var(--link); padding: 6px 0; }
     #cNote { color: #aaa; font-size: 14px; padding: 18px 0; text-align: center; }
-    #cNote a { color: #3ea6ff; }
+    #cNote a { color: var(--link); }
 
     /* More videos, chosen with two chips like YouTube's: "Up next" (videos
        YouTube suggests for this one) and "Watched" (the links you've played
@@ -450,12 +453,13 @@
     button:active { transform: scale(.97); }        /* tiny press effect */
     button[disabled] { opacity: .4; }               /* greyed-out when it can't be used */
 
-    #recBtn { background: var(--accent); flex: 1; font-weight: 600; } /* the big blue one */
-    body.recording #recBtn { background: var(--rec); }                /* turns red while filming */
+    #recBtn { background: var(--accent); flex: 1; font-weight: 600; } /* the big red one */
+    body.recording #recBtn { background: var(--recOn); }              /* turns darker red while filming */
     .iconbtn { padding: 13px 13px; }
     #bar button { white-space: nowrap; }            /* labels never break onto two lines */
     #clipsBtn.waiting { background: #3a2f12; color: #ffe2a8; }  /* clips waiting to be saved */
     body.mode-video #scrollBtn { display: none; }   /* auto-scroll is for Text mode */
+    #scrollBtn.on { background: var(--accent); color: #fff; }   /* filled red while the text is scrolling */
     /* On very narrow phones, squeeze the bar's spacing a little so everything fits. */
     @media (max-width: 360px) {
       #bar { gap: 5px; padding-left: 8px; padding-right: 8px; }
@@ -724,7 +728,7 @@
 
       <div class="row">
         <label for="speed">Auto-scroll speed</label>
-        <input type="range" id="speed" min="0" max="100" value="30" />
+        <input type="range" id="speed" min="5" max="100" value="30" />
       </div>
       <div class="row">
         <label for="fontSize">Text size</label>
@@ -880,6 +884,8 @@ function toParagraphs(t){
 // Apply the saved text size, if any.
 const savedSize = localStorage.getItem('fontSize');
 if (savedSize) { reader.style.fontSize = savedSize + 'px'; $('fontSize').value = savedSize; }
+const savedSpeed = localStorage.getItem('speed');   // auto-scroll speed, remembered too
+if (savedSpeed) $('speed').value = savedSpeed;
 
 /* ---- 3. VIDEO MODE ----
    The player is YouTube's own, from youtube-nocookie.com (YouTube's privacy
@@ -1657,6 +1663,7 @@ async function start() {
   recBtn.textContent = '■ Stop';
   flipBtn.disabled = true;                             // grey out flip while filming
   startTimer();
+  startAutoScroll();                                   // Text mode: the text starts moving up by itself
   updateWake();
   keepVideoPlaying();
   return '';
@@ -1906,21 +1913,43 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---- 8c. AUTO-SCROLL THE TEXT ----
-   requestAnimationFrame runs a function on every screen refresh (~60 times a
-   second), which makes smooth movement. We nudge the text up a little each time. */
+   Tap ⤓ (it fills red), or just start recording in Text mode: the text starts
+   moving up by itself. It stops when you tap ⤓ again, stop recording, or reach
+   the end of the text.
+   requestAnimationFrame runs a function on every screen refresh, which makes
+   smooth movement. The speed is in pixels per SECOND (the slider number), so
+   it's the same on a 120 Hz iPhone, a 60 Hz one, or in Low Power Mode.
+   We keep our OWN exact position (scrollPos) instead of reading the page's
+   back each time: iPhone rounds tiny moves away, which is why the old version
+   could sit still on the phone while working fine on a computer. */
 let scrollRAF = null;     // holds the running animation so we can cancel it
-let scrollCarry = 0;      // remembers fractional pixels between frames
-function autoScrollStep(){
-  const speed = +$('speed').value;                     // 0..100 from the slider
-  scrollCarry += speed / 30;                           // gentle amount per frame
-  if (scrollCarry >= 1) {                              // only move by whole pixels
-    reader.scrollTop += Math.floor(scrollCarry);
-    scrollCarry -= Math.floor(scrollCarry);
+let scrollPos = 0;        // where we've scrolled to, exactly (with fractions)
+let scrollLast = 0;       // the time of the previous step, to work out how far to move
+function autoScrollStep(now){
+  const secs = scrollLast ? Math.min(now - scrollLast, 100) / 1000 : 0;   // time since last step (capped, e.g. after a pause)
+  scrollLast = now;
+  if (Math.abs(reader.scrollTop - scrollPos) > 3) scrollPos = reader.scrollTop;   // you moved it by hand: carry on from there
+  scrollPos += +$('speed').value * secs;               // slider 5..100 = pixels per second
+  const end = reader.scrollHeight - reader.clientHeight;
+  if (scrollPos >= end) {                              // reached the end of the text
+    reader.scrollTop = end;
+    stopAutoScroll();
+    return;
   }
+  reader.scrollTop = scrollPos;
   scrollRAF = requestAnimationFrame(autoScrollStep);   // schedule the next nudge
 }
-function startAutoScroll(){ if (!scrollRAF) { scrollBtn.style.color = '#3b82f6'; autoScrollStep(); updateWake(); } }
-function stopAutoScroll(){ if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; scrollBtn.style.color = ''; updateWake(); } }
+function startAutoScroll(){
+  if (scrollRAF || mode !== 'text') return;
+  const end = reader.scrollHeight - reader.clientHeight;
+  if (reader.scrollTop >= end - 3) reader.scrollTop = 0;   // already at the end: start again from the top
+  scrollPos = reader.scrollTop;
+  scrollLast = 0;
+  scrollBtn.classList.add('on');
+  scrollRAF = requestAnimationFrame(autoScrollStep);
+  updateWake();
+}
+function stopAutoScroll(){ if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; scrollBtn.classList.remove('on'); updateWake(); } }
 
 /* ---- 8d. SWIPE THE CONTROL BAR AWAY ----
    Put a finger on the bottom bar and drag down. The bar follows your finger.
@@ -2242,6 +2271,9 @@ $('saveSettings').addEventListener('click', () => {
   sheet.classList.remove('open');
   if (mode === 'text') reader.scrollTop = 0;
 });
+
+// Auto-scroll speed slider: remembered, and changes the speed straight away.
+$('speed').addEventListener('input', e => localStorage.setItem('speed', e.target.value));
 
 // Text-size slider updates live and is remembered.
 $('fontSize').addEventListener('input', e => {
