@@ -10,7 +10,8 @@
          • Video mode: a YouTube-style page for the YouTube link you paste:
            the normal YouTube player (tap to play, its own full screen), then
            the title, views, likes, description, comments and more videos.
-         • Text mode: just your script, to read (it can scroll by itself).
+         • Text mode: just your script, to read (it can scroll by itself),
+           with a small picture of yourself in the corner while you record.
     2. Films you (or your whiteboard) using the phone's camera. The camera and
        microphone are ONLY switched on while you're recording, never in
        between, to save battery.
@@ -97,11 +98,14 @@
     }
 
     /* ========================================================================
-       CSS SECTION 3 — THE CAMERA (NEVER SHOWN ON SCREEN)
-       On purpose, there is NO camera picture on screen, for the front camera or
-       the back camera, ever. The live camera is plugged into a <video> box that
-       is shrunk to one see-through pixel. (The recording reads the camera
-       directly; the box is only a safety net.)
+       CSS SECTION 3 — THE CAMERA PICTURE
+       The live camera is plugged into a <video> box. Normally it's shrunk to one
+       see-through pixel, so there's no camera picture on screen (the recording
+       reads the camera directly; the box is only a safety net).
+       In Text mode, while recording, the same box becomes a small picture of
+       yourself in the bottom-right corner, just above the control bar.
+       It's mirrored for the front camera (like the Camera app's selfie view);
+       the recording itself is NOT mirrored.
        ======================================================================== */
     #preview {
       position: fixed; left: 0; top: 0;
@@ -109,6 +113,22 @@
       opacity: 0;                      /* completely invisible */
       pointer-events: none;            /* taps go straight through it */
     }
+    body.mode-text.recording #preview {
+      left: auto; top: auto;
+      right: 12px;
+      /* --barH = the control bar's height (set by JavaScript), so the picture
+         sits just above the bar, or near the bottom when the bar is away. */
+      bottom: calc(var(--barH, 0px) + env(safe-area-inset-bottom) + 12px);
+      width: 96px; height: 170px;      /* the same tall shape as the video */
+      object-fit: cover;
+      opacity: 1;
+      background: #000;
+      border: 2px solid var(--rec);    /* red frame: you're recording */
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.5);
+      z-index: 20;
+    }
+    body.selfMirror #preview { transform: scaleX(-1); }   /* front camera: mirror image */
 
     /* ========================================================================
        CSS SECTION 4 — THE "● REC" BADGE  (your small recording indicator)
@@ -579,9 +599,10 @@
 
 <body>
   <!-- ==========================================================================
-       HTML SECTION A — THE CAMERA BOX (INVISIBLE)
-       JavaScript plugs the live camera into this <video>, but CSS shrinks it to
-       one see-through pixel, so you never see yourself or the back camera.
+       HTML SECTION A — THE CAMERA BOX
+       JavaScript plugs the live camera into this <video>. CSS shrinks it to one
+       see-through pixel, except in Text mode while recording, when it's the
+       small picture of yourself in the corner (see CSS section 3).
        "playsinline" and "muted" stop iPhone popping it open full-screen.
        ========================================================================== -->
   <video id="preview" autoplay playsinline muted></video>
@@ -1393,7 +1414,8 @@ async function openCamera() {
   stream = await askForCamera({ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 }, facingMode: facing });
   await applyZoom();
   watchForPauses(stream);
-  preview.srcObject = stream;                         // plug it into the invisible box
+  preview.srcObject = stream;                         // plug it into the camera box
+  document.body.classList.toggle('selfMirror', cameraSide() === 'Front');   // selfie view is mirrored
   log('camera on: ' + cameraReport());                // private note, for tracking down problems
   return stream;
 }
@@ -1401,8 +1423,15 @@ async function openCamera() {
 // Ask the browser for a camera + the microphone. The first time, iPhone asks
 // "Allow camera & microphone?" (set them to Allow in Safari's Website Settings
 // and it never asks again).
+// SOUND: "audio: true" on its own gives you iPhone's PHONE-CALL microphone:
+// echo cancelling, noise removal and automatic volume, all made for calls.
+// That's what made the sound thin, muffled and pumping. Switching those three
+// off gives the plain microphone, like the Camera app uses.
+// (Side effect: in Video mode, if the video plays out loud through the
+// speaker, the microphone now hears it too. Headphones avoid that.)
+const MIC = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: 48000, channelCount: 2 };
 async function askForCamera(video) {
-  const ask = navigator.mediaDevices.getUserMedia({ video, audio: true });
+  const ask = navigator.mediaDevices.getUserMedia({ video, audio: MIC });
   // Don't wait forever. iPhone holds the camera back while it waits to ask
   // "Allow camera?" (which it can't do over a full-screen video). Give up
   // after 10 seconds so the next press can try again.
@@ -1492,7 +1521,16 @@ function cameraReport() {
   const s = track.getSettings ? track.getSettings() : {};
   const r = (track.getCapabilities ? track.getCapabilities() : {}).zoom;
   return `${track.label || '(no name)'} · ${cameraName()} · zoom ${s.zoom === undefined ? 'n/a' : s.zoom}` +
-    (r ? ` (range ${r.min}–${r.max})` : ' (no zoom)') + ` · ${s.width}x${s.height} · ${s.frameRate ? Math.round(s.frameRate) + 'fps' : '?fps'} · ${track.readyState}${track.muted ? ' muted' : ''}`;
+    (r ? ` (range ${r.min}–${r.max})` : ' (no zoom)') + ` · ${s.width}x${s.height} · ${s.frameRate ? Math.round(s.frameRate) + 'fps' : '?fps'} · ${track.readyState}${track.muted ? ' muted' : ''}` +
+    ` · mic: ${micReport()}`;
+}
+
+// The microphone's settings, for the private log, e.g. "48000 Hz · 1 ch · echo cancel off".
+function micReport() {
+  const mic = stream && stream.getAudioTracks()[0];
+  if (!mic) return 'none';
+  const a = mic.getSettings ? mic.getSettings() : {};
+  return `${a.sampleRate || '?'} Hz · ${a.channelCount || '?'} ch · echo cancel ${a.echoCancellation === undefined ? '?' : a.echoCancellation ? 'ON' : 'off'}`;
 }
 
 // The sentence to show when the camera wouldn't switch on.
@@ -1588,6 +1626,9 @@ function showFacing() { flipBtn.textContent = facing === 'user' ? '⇄ Front' : 
    mp4, which also drops straight into Photos. Other devices may only do webm. */
 function pickFormat() {
   const tryTypes = [
+    // H.264 "High" (the kind the Camera app uses). Without asking, Safari uses
+    // "Baseline", an older, simpler kind that looks blockier at the same size.
+    'video/mp4;codecs="avc1.640028,mp4a.40.2"',
     'video/mp4',
     'video/mp4;codecs=h264,aac',
     'video/webm;codecs=h264',
@@ -1598,6 +1639,177 @@ function pickFormat() {
     if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
   }
   return '';   // if none matched, let the browser decide
+}
+
+/* ---- 6b. SMOOTH OUT THE FRAME TIMES (why Safari clips looked jerky) ----
+   The camera films a steady 30 frames a second, exactly like the Camera app.
+   But Safari writes down WHEN each frame happened using its sound clock, which
+   only ticks every 23 milliseconds. So the frame times in the file come out
+   uneven (23 ms, 23 ms, 46 ms, two frames at the same moment, …) instead of
+   an even 33 ms each. The video then plays back with a stutter, even though
+   no frames are missing. (Measured on real clips from this page: half the
+   frame gaps were wrong. Camera-app clips: every gap exactly 33 ms.)
+   The fix: after you stop, put every frame back on a steady 30-a-second beat
+   that follows the real timing, so the picture stays in sync with your voice
+   (each frame moves only a few thousandths of a second, never more than 0.08 s,
+   or the clip is left exactly as it was).
+   Nothing is re-compressed: the picture and sound stay exactly as recorded.
+   Only the list of frame times inside the file is rewritten. If anything about
+   the file looks unexpected, the clip is kept exactly as it was. */
+
+// Gives back { blob, note }: the smoothed video (or the original), and a short
+// sentence for the private log describing what was found and done.
+async function smoothFrames(blob) {
+  const bytes = async (a, b) => new Uint8Array(await blob.slice(a, b).arrayBuffer());
+  const u16 = (d, o) => (d[o] << 8) | d[o + 1];
+  const u32 = (d, o) => ((d[o] << 24) >>> 0) + (d[o + 1] << 16) + (d[o + 2] << 8) + d[o + 3];
+  const u64 = (d, o) => u32(d, o) * 2 ** 32 + u32(d, o + 4);
+  const put32 = (d, o, v) => { d[o] = (v >>> 24) & 255; d[o + 1] = (v >>> 16) & 255; d[o + 2] = (v >>> 8) & 255; d[o + 3] = v & 255; };
+  const put64 = (d, o, v) => { put32(d, o, Math.floor(v / 2 ** 32)); put32(d, o + 4, v % 2 ** 32); };
+  const name4 = (d, o) => String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]);
+  // The boxes inside a box (an mp4 file is boxes inside boxes).
+  const kids = (d, from, to) => {
+    const out = [];
+    for (let p = from; p + 8 <= to;) {
+      let size = u32(d, p), head = 8;
+      if (size === 1) { size = u64(d, p + 8); head = 16; }
+      if (size < 8 || p + size > to) break;
+      out.push({ type: name4(d, p + 4), start: p, body: p + head, end: p + size });
+      p += size;
+    }
+    return out;
+  };
+  const kid = (d, box, type) => kids(d, box.body, box.end).find(b => b.type === type);
+  const leave = note => ({ blob, note });
+
+  // 1. The file's top-level boxes. Safari's clips are: one "moov" (what's in
+  //    the file) then pairs of "moof" (a list of frames) + "mdat" (the frames).
+  const top = [];
+  for (let p = 0; p + 8 <= blob.size;) {
+    const h = await bytes(p, Math.min(p + 16, blob.size));
+    let size = u32(h, 0);
+    if (size === 1) size = u64(h, 8);
+    if (size === 0) size = blob.size - p;
+    if (size < 8 || p + size > blob.size) return leave('frame times: unexpected file layout, left as recorded');
+    top.push({ type: name4(h, 4), start: p, end: p + size });
+    p += size;
+  }
+  const moovBox = top.find(b => b.type === 'moov');
+  if (!moovBox || !top.some(b => b.type === 'moof')) return leave('frame times: not a pieces-style file, left as recorded');
+
+  // 2. From "moov": which track is the video, its clock, and (for the log)
+  //    the picture format and the sound's quality.
+  const m = await bytes(moovBox.start, moovBox.end);
+  const moov = { body: 8, end: m.length };
+  let videoId = 0, scale = 0;
+  const info = [];
+  for (const trak of kids(m, moov.body, moov.end).filter(b => b.type === 'trak')) {
+    const tkhd = kid(m, trak, 'tkhd'), mdia = kid(m, trak, 'mdia');
+    if (!tkhd || !mdia) continue;
+    const id = u32(m, tkhd.body + (m[tkhd.body] === 1 ? 20 : 12));
+    const hdlr = kid(m, mdia, 'hdlr'), mdhd = kid(m, mdia, 'mdhd');
+    const kind = hdlr ? name4(m, hdlr.body + 8) : '';
+    const minf = kid(m, mdia, 'minf'), stbl = minf && kid(m, minf, 'stbl'), stsd = stbl && kid(m, stbl, 'stsd');
+    const entry = stsd ? kids(m, stsd.body + 8, stsd.end)[0] : null;
+    if (kind === 'vide') {
+      videoId = id;
+      scale = mdhd ? u32(m, mdhd.body + (m[mdhd.body] === 1 ? 20 : 12)) : 0;
+      if (entry) {
+        const w = u16(m, entry.body + 24), h = u16(m, entry.body + 26);
+        const cfg = kids(m, entry.body + 78, entry.end).find(b => b.type === 'avcC' || b.type === 'hvcC');
+        const prof = cfg && cfg.type === 'avcC' ? ({ 66: 'Baseline', 77: 'Main', 100: 'High' }[m[cfg.body + 1]] || 'profile ' + m[cfg.body + 1]) : '';
+        info.push(`video ${entry.type}${prof ? ' ' + prof : ''} ${w}x${h}`);
+      }
+    } else if (kind === 'soun' && entry) {
+      info.push(`sound ${entry.type} ${u16(m, entry.body + 24)} Hz`);
+    }
+  }
+  const about = info.join(' · ');
+  if (!videoId || !scale) return leave(about + ' · frame times: no video track found, left as recorded');
+
+  // 3. Every video frame's time, and where its length is written in the file.
+  const moofs = new Map();     // top-level box → its bytes (which we may change)
+  const groups = [];           // one per list of frames: where its start time is written, and its frames
+  const times = [], lens = [];
+  for (const box of top.filter(b => b.type === 'moof')) {
+    const d = await bytes(box.start, box.end);
+    moofs.set(box, d);
+    for (const traf of kids(d, 8, d.length).filter(b => b.type === 'traf')) {
+      const tfhd = kid(d, traf, 'tfhd');
+      if (!tfhd || u32(d, tfhd.body + 4) !== videoId) continue;
+      const tfFlags = u32(d, tfhd.body) & 0xffffff;
+      const defAt = tfFlags & 8 ? tfhd.body + 8 + (tfFlags & 1 ? 8 : 0) + (tfFlags & 2 ? 4 : 0) : -1;
+      const tfdt = kid(d, traf, 'tfdt');
+      if (!tfdt) return leave(about + ' · frame times: missing start time, left as recorded');
+      const v1 = d[tfdt.body] === 1;
+      let t = v1 ? u64(d, tfdt.body + 4) : u32(d, tfdt.body + 4);
+      const group = { d, tfdtAt: tfdt.body + 4, v1, first: times.length, frames: [], defAt };
+      for (const trun of kids(d, traf.body, traf.end).filter(b => b.type === 'trun')) {
+        const fl = u32(d, trun.body) & 0xffffff, n = u32(d, trun.body + 4);
+        let at = trun.body + 8 + (fl & 1 ? 4 : 0) + (fl & 4 ? 4 : 0);
+        const each = [0x100, 0x200, 0x400, 0x800].filter(bit => fl & bit).length * 4;
+        for (let i = 0; i < n; i++, at += each) {
+          if (fl & 0x800 && u32(d, at + each - 4) !== 0) return leave(about + ' · frame times: reordered frames, left as recorded');
+          const lenAt = fl & 0x100 ? at : -1;
+          const len = lenAt >= 0 ? u32(d, lenAt) : (defAt >= 0 ? u32(d, defAt) : -1);
+          if (len < 0) return leave(about + ' · frame times: no frame lengths, left as recorded');
+          group.frames.push(lenAt);
+          times.push(t); lens.push(len); t += len;
+        }
+      }
+      if (group.frames.length) groups.push(group);
+    }
+  }
+  const N = times.length;
+  if (N < 30) return leave(about + ' · frame times: clip too short to smooth');
+
+  // 4. The steady beat. Split the clip wherever the camera really paused
+  //    (a gap of more than 3 frames), and inside each stretch put the frames
+  //    evenly on the beat, following the real timing over about a second.
+  const beat = scale / 30;
+  const gapsBefore = times.slice(1).map((t, i) => t - times[i]);
+  const fresh = new Array(N);
+  const starts = [0];
+  gapsBefore.forEach((g, i) => { if (g > 3 * beat) starts.push(i + 1); });
+  starts.forEach((a, s) => {
+    const b = s + 1 < starts.length ? starts[s + 1] : N, n = b - a;
+    const step = n >= 30 ? (times[b - 1] - times[a]) / (n - 1) : beat;   // this stretch's real speed
+    const sum = [0];
+    for (let k = 0; k < n; k++) sum.push(sum[k] + times[a + k] - k * step);
+    for (let k = 0; k < n; k++) {
+      const lo = Math.max(0, k - 15), hi = Math.min(n, k + 16);
+      fresh[a + k] = Math.round(k * step + (sum[hi] - sum[lo]) / (hi - lo));
+    }
+  });
+  for (let i = 1; i < N; i++) if (fresh[i] <= fresh[i - 1]) fresh[i] = fresh[i - 1] + 1;
+  let moved = 0;
+  for (let i = 0; i < N; i++) moved = Math.max(moved, Math.abs(fresh[i] - times[i]));
+  const ms = x => Math.round(x * 1000 / scale);
+  if (moved > scale * 0.08) return leave(about + ` · frame times: smoothing would move a frame ${ms(moved)} ms, left as recorded`);
+  const freshLen = i => i + 1 < N ? fresh[i + 1] - fresh[i] : lens[N - 1] + times[N - 1] - fresh[N - 1];
+  if (freshLen(N - 1) < 1) return leave(about + ' · frame times: odd ending, left as recorded');
+
+  // 5. Write the new times into the frame lists (same sizes, so nothing else
+  //    in the file moves), and glue the file back together.
+  for (const g of groups) {
+    const t0 = fresh[g.first];
+    if (g.v1) put64(g.d, g.tfdtAt, t0);
+    else if (t0 < 2 ** 32) put32(g.d, g.tfdtAt, t0);
+    else return leave(about + ' · frame times: clip too long to smooth');
+    const shared = [];
+    g.frames.forEach((lenAt, k) => {
+      if (lenAt >= 0) put32(g.d, lenAt, freshLen(g.first + k));
+      else shared.push(freshLen(g.first + k));
+    });
+    if (shared.length) put32(g.d, g.defAt, Math.round(shared.reduce((x, y) => x + y, 0) / shared.length));
+  }
+  const parts = top.map(b => moofs.get(b) || blob.slice(b.start, b.end));
+  const range = arr => Math.min(...arr) + '–' + Math.max(...arr);
+  const after = fresh.slice(1).map((t, i) => t - fresh[i]).filter((g, i) => !starts.includes(i + 1));
+  return {
+    blob: new Blob(parts, { type: blob.type }),
+    note: `${about} · ${N} frames smoothed: gaps were ${range(gapsBefore.map(ms))} ms, now ${range(after.map(ms))} ms (moved ≤ ${ms(moved)} ms)`
+  };
 }
 
 // START: switch the camera + microphone on, then record. Used by the Start
@@ -1725,8 +1937,19 @@ function metaOf(c) {
 // FINISH: runs once a recorder has bundled all its pieces into one file.
 async function finish(rec, pieces) {
   const type = (rec.mimeType || 'video/mp4').includes('mp4') ? 'video/mp4' : (rec.mimeType || 'video/webm');
-  // A "Blob" is the finished video held in memory. We glue the pieces together.
-  const blob = new Blob(pieces, { type });
+  // A "Blob" is the finished video held in memory. We glue the pieces together,
+  // then put the frames back on an even beat (see 6b). Never waits more than
+  // 15 seconds: if smoothing is slow or fails, the clip is kept as recorded.
+  let blob = new Blob(pieces, { type });
+  if (type === 'video/mp4') {
+    try {
+      const done = await Promise.race([smoothFrames(blob), new Promise(ok => setTimeout(() => ok(null), 15000))]);
+      if (done) { blob = done.blob; log('clip ' + rec.takeNo + ': ' + done.note); }
+      else log('clip ' + rec.takeNo + ': frame times: smoothing took too long, left as recorded');
+    } catch (e) {
+      log('clip ' + rec.takeNo + ': frame times: ' + e + ', left as recorded');
+    }
+  }
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   const name = `recording-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${type === 'video/mp4' ? 'mp4' : 'webm'}`;
@@ -2013,6 +2236,11 @@ function showBar() {
   bar.style.transition = 'transform .2s ease-out';
   bar.style.transform = '';                           // …and glide up into place
 }
+
+// Keep --barH (the control bar's height) up to date, so the small picture of
+// yourself in Text mode sits just above the bar, or near the bottom while the
+// bar is away (it then measures 0).
+new ResizeObserver(() => document.documentElement.style.setProperty('--barH', bar.offsetHeight + 'px')).observe(bar);
 
 // The "▲ Controls" tab: a tap brings the bar back, and so does a swipe up.
 barHandle.addEventListener('click', showBar);
