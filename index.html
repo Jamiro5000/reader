@@ -2332,15 +2332,15 @@ window.addEventListener('hashchange', listenForActionButton);
 window.addEventListener('pageshow', listenForActionButton);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) listenForActionButton(); });
 
-// Do the press exactly like tapping Start/Stop, then post what happened (the
-// Shortcut shows that as a banner). It always answers, even if something
-// goes wrong, so the banner can say what.
+// Do the press exactly like tapping Start/Stop, then answer the Shortcut.
+// It ALWAYS answers, so the Shortcut can tell "worked" from "page not open":
+//   • it worked → the answer is just "#ok#", and the Shortcut stays silent
+//     (you can already see it's recording: the REC badge, iPhone's green dot)
+//   • a problem → the answer is the sentence saying what went wrong, and the
+//     Shortcut shows it as a notification
+// No answer at all means the page isn't open, and the Shortcut says that.
+const ALL_GOOD = '#ok#';
 async function answerPress() {
-  // Switching the camera on can take a moment, longer than the Shortcut
-  // waits. So say so straight away, then report the result.
-  if (!recording && !starting && !document.hidden) {
-    fetch(RELAY + lineCode + '_r', { method: 'POST', body: '◌ Switching the camera on…' }).catch(() => {});
-  }
   let result;
   try {
     result = await remoteToggle();
@@ -2348,8 +2348,9 @@ async function answerPress() {
     result = { ok: false, text: '⚠️ Something went wrong: ' + (e && e.message ? e.message : e) };
     log('error: ' + result.text);
   }
-  toast('Action Button: ' + result.text);
-  fetch(RELAY + lineCode + '_r', { method: 'POST', body: result.text }).catch(() => {});
+  const fine = result.ok && !result.text.includes('⚠');   // a warning (e.g. camera paused) counts as a problem
+  if (!fine) toast(result.text);                          // problems only: no pop-up when it just worked
+  fetch(RELAY + lineCode + '_r', { method: 'POST', body: fine ? ALL_GOOD : result.text }).catch(() => {});
 }
 
 // A short private note to ntfy.sh, on a third channel (pair code + "_d"), about
@@ -2370,7 +2371,7 @@ function toast(text) {
 
 // Start if stopped, stop if recording. Gives back the sentence for the banner.
 async function remoteToggle() {
-  if (starting) return { ok: false, text: 'Still starting. Press again in a second.' };
+  if (starting) return { ok: false, text: '⚠️ Still starting. Press again in a second.' };
   if (recording) {
     const paused = (endPause(), recorder.pausedMs || 0);
     const n = stop();
@@ -2398,7 +2399,7 @@ function showRemote(state) {
 
 // The record button: if we're recording, stop; otherwise, start.
 recBtn.addEventListener('click', () => {
-  if (recording) { const n = stop(); toast('■ Clip ' + n + ' kept. Tap 🎞 when you’re done to save to Photos.'); }
+  if (recording) stop();          // no pop-up: the REC badge going away shows it stopped, and 🎞 counts the clip
   else start();
 });
 clipsBtn.addEventListener('click', openClips);
