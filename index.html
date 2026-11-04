@@ -2287,12 +2287,29 @@ let remoteState = '';   // 'on', 'off' or 'unpaired'
 
 // Opened through the setup link? Save the pair code, then tidy the address
 // bar so the code doesn't sit there on screen.
+// Each phone has its OWN button code. If this phone is already connected and
+// someone opens a DIFFERENT phone's setup link on it (e.g. tapping the QR code
+// shown on this screen), it must never quietly switch: that made one phone's
+// button record on two phones. So it asks first, and the answer "Cancel"
+// keeps the button it has.
 function takePairCodeFromLink() {
   const m = location.hash.match(/pair=([A-Za-z0-9_-]{16,60})/);
   if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);   // hide the code from the address bar
+  const old = localStorage.getItem('pairCode');
+  if (old === m[1]) return;                                              // same button: nothing to do
+  if (old && !confirm('This phone is already connected to its own Action Button (button ' + buttonId(old) + ').\n\n' +
+      'This setup link is for a DIFFERENT button (' + buttonId(m[1]) + '), probably another phone’s. ' +
+      'Switch this phone to it? Only do that if this link is meant for THIS phone.')) {
+    log('kept button ' + buttonId(old) + ', refused setup link for ' + buttonId(m[1]));
+    return;
+  }
   localStorage.setItem('pairCode', m[1]);
-  history.replaceState(null, '', location.pathname + location.search);
 }
+
+// A short name for a button code, safe to show on screen (e.g. "#X7Q2"): the
+// last 4 letters only, so you can tell phones apart without showing the code.
+function buttonId(code) { return '#' + String(code).slice(-4).toUpperCase(); }
 
 // Start listening, unless we already are. Safe to call again and again, which
 // is how a tab that was opened BEFORE you scanned the setup code catches up.
@@ -2388,7 +2405,7 @@ function showRemote(state) {
   remoteState = state;
   pairWarn.classList.toggle('show', state === 'unpaired' && !pairWarn.dataset.hidden);
   remoteStatus.innerHTML = {
-    on: '✓ Listening for the Action Button.',
+    on: '✓ Listening for this phone’s Action Button (button ' + buttonId(lineCode) + ').',
     off: '✗ Can’t reach the relay right now (no internet?). It keeps retrying by itself.',
     unpaired: '✗ Not set up on this phone yet. Scan your setup QR code once, then come back to this tab.'
   }[state];
