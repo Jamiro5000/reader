@@ -584,7 +584,6 @@
     .clipRow button, .clipRow a { flex: 0 0 auto; font-size: 13px; padding: 8px 10px; border-radius: 10px; }
     .clipRow a { color: var(--muted); }
     .clipRow .delBtn { background: none; color: var(--muted); padding: 8px 6px; }
-    #clearSaved { background: #262a33; }
 
     /* A small red error strip, shown only if something goes wrong. */
     #err {
@@ -796,10 +795,9 @@
       <div id="saveMsg"></div>
       <div id="keepNote">This tab can’t keep clips once the page closes (it may be a <b>Private</b> tab). Save them before closing it, and use a normal Safari tab next time.</div>
       <div id="clipList"><!-- one row per clip, filled in by JavaScript --></div>
-      <button id="clearSaved">Remove saved clips from this page</button>
-      <p>Clips are kept on this phone (inside Safari, for this page) until you
-        save them, even if the page reloads. Clips already saved to Photos
-        are removed from here after 3 days.</p>
+      <p>Clips are kept on this phone (inside Safari, for this page), even
+        after you save them and even if the page reloads. Nothing is ever
+        removed by itself: a clip only goes when you tap its ✕.</p>
       <button id="closeClips" style="background:#262a33">Back</button>
     </div>
   </div>
@@ -1974,15 +1972,15 @@ async function finish(rec, pieces) {
   }
 }
 
-// When the page opens: bring back the clips kept on this phone, and tidy away
-// ones saved to Photos more than 3 days ago.
+// When the page opens: bring back the clips kept on this phone. Nothing is
+// ever thrown away here (it used to tidy away clips saved 3+ days ago, but a
+// clip can look "saved" and still be broken in Photos, so only ✕ deletes).
 async function loadKeptClips() {
   try {
     const [metas, videos] = await store('readonly', (meta, video) => [meta.getAll(), video.getAll()]);
-    const oldest = Date.now() - 3 * 24 * 3600 * 1000;
     for (const m of metas.sort((a, b) => a.id - b.id)) {
       const v = videos.find(x => x.id === m.id);
-      if (!v || (m.saved && m.savedAt < oldest)) { forget(m.id); continue; }
+      if (!v || !v.blob) continue;                     // no video stored: skip, but delete nothing
       if (clips.some(c => c.id === m.id)) continue;
       clips.push({ ...m, blob: v.blob, file: new File([v.blob], m.name, { type: m.type }), kept: true });
     }
@@ -2091,7 +2089,6 @@ function showClips() {
       <a class="filesLink" data-id="${c.id}" href="#">Files</a>
       <button class="delBtn" data-id="${c.id}" aria-label="Delete clip ${c.no}">✕</button>
     </div>`).join('');
-  $('clearSaved').style.display = clips.some(c => c.saved) ? '' : 'none';
   $('keepNote').style.display = clips.some(c => c.kept === false && !c.saved) ? 'block' : 'none';
 }
 
@@ -2496,13 +2493,6 @@ $('clipList').addEventListener('click', e => {
     showClips(); showClipCount();
     if (!clips.length) clipsScreen.classList.remove('open');
   }
-});
-$('clearSaved').addEventListener('click', () => {
-  const saved = clips.filter(c => c.saved);
-  if (!confirm('Remove ' + saved.length + ' saved clip' + (saved.length === 1 ? '' : 's') + ' from this page? They stay in Photos.')) return;
-  saved.forEach(c => { clips.splice(clips.indexOf(c), 1); forget(c.id); });
-  showClips(); showClipCount();
-  if (!clips.length) clipsScreen.classList.remove('open');
 });
 $('closeClips').addEventListener('click', () => clipsScreen.classList.remove('open'));
 
