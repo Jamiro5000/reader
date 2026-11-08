@@ -1639,31 +1639,37 @@ function pickFormat() {
   return '';   // if none matched, let the browser decide
 }
 
-/* ---- 6b. SMOOTH OUT THE FRAME TIMES (why Safari clips looked jerky) ----
-   The camera films a steady 30 frames a second, exactly like the Camera app.
-   But Safari writes down WHEN each frame happened using its sound clock, which
-   only ticks every 23 milliseconds. So the frame times in the file come out
-   uneven (23 ms, 23 ms, 46 ms, two frames at the same moment, …) instead of
-   an even 33 ms each. The video then plays back with a stutter, even though
-   no frames are missing. (Measured on real clips from this page: half the
-   frame gaps were wrong. Camera-app clips: every gap exactly 33 ms.)
-   The fix: after you stop, put every frame back on a steady 30-a-second beat
-   that follows the real timing, so the picture stays in sync with your voice
-   (each frame moves only a few thousandths of a second, never more than 0.08 s,
-   or the clip is left exactly as it was).
-   Nothing is re-compressed: the picture and sound stay exactly as recorded.
-   Only the list of frame times inside the file is rewritten. If anything about
-   the file looks unexpected, the clip is kept exactly as it was. */
+/* ---- 6b. TURN THE RECORDING INTO A NORMAL VIDEO FILE ----
+   Safari records in "pieces" (a fragmented mp4): a short header that lists
+   no frames at all, then, for every second or two, a small list of frames
+   ("moof") followed by the frames themselves ("mdat").
 
-// Gives back { blob, note }: the smoothed video (or the original), and a short
-// sentence for the private log describing what was found and done.
-async function smoothFrames(blob) {
+   WHAT WENT WRONG BEFORE (Nov 2026): the page used to rebuild the file out of
+   cut-out parts of the recording (to even out the frame times). On long clips
+   iPhone Safari pasted WHOLE pieces instead of the cut-out parts, so the file
+   came out jumbled: the header three times, every frame list twice. Players
+   stop at the repeated header, so a 3-minute, 400 MB clip played for 2 seconds.
+   Nothing was lost: every frame is still in the file, in the right order.
+
+   WHAT THIS DOES NOW: it never cuts the recording up. It reads where every
+   frame is, then writes ONE complete list of all frames (where each is in the
+   file, how big, how long it lasts), the way the Camera app lays out its own
+   videos, and puts that in front of the untouched recording:
+       [new header with the full frame list] + [the whole recording, as is]
+   The old jumbled bits stay inside, unused; players only go where the list
+   points. So it repairs the clips recorded before the fix too, costs almost
+   no memory, and the picture and sound are never re-compressed.
+   It also evens out the frame times here (Safari stamps frames on its sound
+   clock, which made video stutter): each frame moves a few thousandths of a
+   second at most, never more than 0.08 s, or the times are left as recorded.
+   Gives back { blob, seconds, note }. Throws if the file isn't the kind
+   Safari makes; the caller then keeps the recording exactly as it was. */
+async function makeNormalFile(blob) {
   const bytes = async (a, b) => new Uint8Array(await blob.slice(a, b).arrayBuffer());
   const u16 = (d, o) => (d[o] << 8) | d[o + 1];
   const u32 = (d, o) => ((d[o] << 24) >>> 0) + (d[o + 1] << 16) + (d[o + 2] << 8) + d[o + 3];
   const u64 = (d, o) => u32(d, o) * 2 ** 32 + u32(d, o + 4);
-  const put32 = (d, o, v) => { d[o] = (v >>> 24) & 255; d[o + 1] = (v >>> 16) & 255; d[o + 2] = (v >>> 8) & 255; d[o + 3] = v & 255; };
-  const put64 = (d, o, v) => { put32(d, o, Math.floor(v / 2 ** 32)); put32(d, o + 4, v % 2 ** 32); };
+  const s32 = (d, o) => u32(d, o) | 0;
   const name4 = (d, o) => String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]);
   // The boxes inside a box (an mp4 file is boxes inside boxes).
   const kids = (d, from, to) => {
@@ -1671,143 +1677,261 @@ async function smoothFrames(blob) {
     for (let p = from; p + 8 <= to;) {
       let size = u32(d, p), head = 8;
       if (size === 1) { size = u64(d, p + 8); head = 16; }
-      if (size < 8 || p + size > to) break;
+      if (size === 0) size = to - p;
+      if (size < 8 || p + size > to) throw new Error('broken box ' + name4(d, p + 4));
       out.push({ type: name4(d, p + 4), start: p, body: p + head, end: p + size });
       p += size;
     }
     return out;
   };
   const kid = (d, box, type) => kids(d, box.body, box.end).find(b => b.type === type);
-  const leave = note => ({ blob, note });
 
-  // 1. The file's top-level boxes. Safari's clips are: one "moov" (what's in
-  //    the file) then pairs of "moof" (a list of frames) + "mdat" (the frames).
+  // 1. The top-level boxes of the whole file.
   const top = [];
   for (let p = 0; p + 8 <= blob.size;) {
     const h = await bytes(p, Math.min(p + 16, blob.size));
-    let size = u32(h, 0);
-    if (size === 1) size = u64(h, 8);
+    let size = u32(h, 0), head = 8;
+    if (size === 1) { size = u64(h, 8); head = 16; }
     if (size === 0) size = blob.size - p;
-    if (size < 8 || p + size > blob.size) return leave('frame times: unexpected file layout, left as recorded');
-    top.push({ type: name4(h, 4), start: p, end: p + size });
+    if (size < 8) throw new Error('broken file at byte ' + p);
+    if (p + size > blob.size) break;              // an unfinished last piece: keep what's whole
+    top.push({ type: name4(h, 4), start: p, body: p + head, end: p + size });
     p += size;
   }
   const moovBox = top.find(b => b.type === 'moov');
-  if (!moovBox || !top.some(b => b.type === 'moof')) return leave('frame times: not a pieces-style file, left as recorded');
-
-  // 2. From "moov": which track is the video, its clock, and (for the log)
-  //    the picture format and the sound's quality.
+  if (!moovBox) throw new Error('no header');
   const m = await bytes(moovBox.start, moovBox.end);
-  const moov = { body: 8, end: m.length };
-  let videoId = 0, scale = 0;
-  const info = [];
-  for (const trak of kids(m, moov.body, moov.end).filter(b => b.type === 'trak')) {
-    const tkhd = kid(m, trak, 'tkhd'), mdia = kid(m, trak, 'mdia');
-    if (!tkhd || !mdia) continue;
-    const id = u32(m, tkhd.body + (m[tkhd.body] === 1 ? 20 : 12));
-    const hdlr = kid(m, mdia, 'hdlr'), mdhd = kid(m, mdia, 'mdhd');
-    const kind = hdlr ? name4(m, hdlr.body + 8) : '';
-    const minf = kid(m, mdia, 'minf'), stbl = minf && kid(m, minf, 'stbl'), stsd = stbl && kid(m, stbl, 'stsd');
-    const entry = stsd ? kids(m, stsd.body + 8, stsd.end)[0] : null;
-    if (kind === 'vide') {
-      videoId = id;
-      scale = mdhd ? u32(m, mdhd.body + (m[mdhd.body] === 1 ? 20 : 12)) : 0;
-      if (entry) {
-        const w = u16(m, entry.body + 24), h = u16(m, entry.body + 26);
-        const cfg = kids(m, entry.body + 78, entry.end).find(b => b.type === 'avcC' || b.type === 'hvcC');
-        const prof = cfg && cfg.type === 'avcC' ? ({ 66: 'Baseline', 77: 'Main', 100: 'High' }[m[cfg.body + 1]] || 'profile ' + m[cfg.body + 1]) : '';
-        info.push(`video ${entry.type}${prof ? ' ' + prof : ''} ${w}x${h}`);
-      }
-    } else if (kind === 'soun' && entry) {
-      info.push(`sound ${entry.type} ${u16(m, entry.body + 24)} Hz`);
-    }
-  }
-  const about = info.join(' · ');
-  if (!videoId || !scale) return leave(about + ' · frame times: no video track found, left as recorded');
+  const moovKids = kids(m, 8, m.length);
+  const mvhd = moovKids.find(b => b.type === 'mvhd');
+  if (!mvhd) throw new Error('no mvhd');
+  const movieScale = u32(m, mvhd.body + (m[mvhd.body] === 1 ? 20 : 12));
+  if (!movieScale) throw new Error('no movie clock');
 
-  // 3. Every video frame's time, and where its length is written in the file.
-  const moofs = new Map();     // top-level box → its bytes (which we may change)
-  const groups = [];           // one per list of frames: where its start time is written, and its frames
-  const times = [], lens = [];
-  for (const box of top.filter(b => b.type === 'moof')) {
+  // 2. The tracks (video, sound) and their default frame settings.
+  const tracks = new Map();
+  for (const trak of moovKids.filter(b => b.type === 'trak')) {
+    const tkhd = kid(m, trak, 'tkhd'), mdia = kid(m, trak, 'mdia');
+    const mdhd = mdia && kid(m, mdia, 'mdhd'), hdlr = mdia && kid(m, mdia, 'hdlr');
+    const minf = mdia && kid(m, mdia, 'minf'), stbl = minf && kid(m, minf, 'stbl');
+    const stsd = stbl && kid(m, stbl, 'stsd');
+    if (!tkhd || !mdhd || !hdlr || !stsd) throw new Error('incomplete track');
+    const id = u32(m, tkhd.body + (m[tkhd.body] === 1 ? 20 : 12));
+    tracks.set(id, {
+      id, tkhd, mdia, mdhd, hdlr, minf, stsd,
+      kind: name4(m, hdlr.body + 8),
+      scale: u32(m, mdhd.body + (m[mdhd.body] === 1 ? 20 : 12)),
+      def: { dur: 0, size: 0, flags: 0 },
+      start: -1, end: 0,                          // time of the first frame / just after the last
+      sizes: [], durs: [], ctos: [], sync: [], chunks: []   // chunk = [where in the file, frame count]
+    });
+  }
+  const mvex = moovKids.find(b => b.type === 'mvex');
+  if (mvex) for (const trex of kids(m, mvex.body, mvex.end).filter(b => b.type === 'trex')) {
+    const t = tracks.get(u32(m, trex.body + 4));
+    if (t) t.def = { dur: u32(m, trex.body + 12), size: u32(m, trex.body + 16), flags: u32(m, trex.body + 20) };
+  }
+
+  // 3. The pieces: each frame list that sits right in front of its frames.
+  //    (A frame list with no frames after it is a leftover copy; one we've
+  //    already had, by its piece number, is a repeat. Both are skipped.)
+  let lastPiece = 0, pieces = 0, repeats = 0;
+  for (let i = 1; i < top.length; i++) {
+    const box = top[i - 1], mdat = top[i];
+    if (mdat.type !== 'mdat' || box.type !== 'moof') continue;
     const d = await bytes(box.start, box.end);
-    moofs.set(box, d);
+    const mfhd = kids(d, 8, d.length).find(b => b.type === 'mfhd');
+    const no = mfhd ? u32(d, mfhd.body + 4) : lastPiece + 1;
+    if (no <= lastPiece) { repeats++; continue; }
+    lastPiece = no; pieces++;
     for (const traf of kids(d, 8, d.length).filter(b => b.type === 'traf')) {
       const tfhd = kid(d, traf, 'tfhd');
-      if (!tfhd || u32(d, tfhd.body + 4) !== videoId) continue;
-      const tfFlags = u32(d, tfhd.body) & 0xffffff;
-      const defAt = tfFlags & 8 ? tfhd.body + 8 + (tfFlags & 1 ? 8 : 0) + (tfFlags & 2 ? 4 : 0) : -1;
+      if (!tfhd) throw new Error('no tfhd');
+      const t = tracks.get(u32(d, tfhd.body + 4));
+      if (!t) continue;
+      const f = u32(d, tfhd.body) & 0xffffff;
+      let o = tfhd.body + 8, base = box.start;
+      if (f & 1) throw new Error('absolute frame positions');   // Safari never does this
+      if (f & 2) o += 4;                          // which format entry (Safari has one)
+      const dur = f & 8 ? u32(d, (o += 4) - 4) : t.def.dur;
+      const size = f & 0x10 ? u32(d, (o += 4) - 4) : t.def.size;
+      const flags = f & 0x20 ? u32(d, (o += 4) - 4) : t.def.flags;
+      // When this piece starts. Close any small gap/overlap with the frame
+      // before it, so sound and picture stay exactly where they were.
       const tfdt = kid(d, traf, 'tfdt');
-      if (!tfdt) return leave(about + ' · frame times: missing start time, left as recorded');
-      const v1 = d[tfdt.body] === 1;
-      let t = v1 ? u64(d, tfdt.body + 4) : u32(d, tfdt.body + 4);
-      const group = { d, tfdtAt: tfdt.body + 4, v1, first: times.length, frames: [], defAt };
-      for (const trun of kids(d, traf.body, traf.end).filter(b => b.type === 'trun')) {
-        const fl = u32(d, trun.body) & 0xffffff, n = u32(d, trun.body + 4);
-        let at = trun.body + 8 + (fl & 1 ? 4 : 0) + (fl & 4 ? 4 : 0);
-        const each = [0x100, 0x200, 0x400, 0x800].filter(bit => fl & bit).length * 4;
-        for (let i = 0; i < n; i++, at += each) {
-          if (fl & 0x800 && u32(d, at + each - 4) !== 0) return leave(about + ' · frame times: reordered frames, left as recorded');
-          const lenAt = fl & 0x100 ? at : -1;
-          const len = lenAt >= 0 ? u32(d, lenAt) : (defAt >= 0 ? u32(d, defAt) : -1);
-          if (len < 0) return leave(about + ' · frame times: no frame lengths, left as recorded');
-          group.frames.push(lenAt);
-          times.push(t); lens.push(len); t += len;
+      if (tfdt) {
+        const at = d[tfdt.body] === 1 ? u64(d, tfdt.body + 4) : u32(d, tfdt.body + 4);
+        if (t.start < 0) { t.start = at; t.end = at; }
+        else if (t.durs.length && at !== t.end) {
+          const last = t.durs.length - 1, fixed = t.durs[last] + (at - t.end);
+          if (fixed >= 1) { t.durs[last] = fixed; t.end = at; }
         }
+      } else if (t.start < 0) { t.start = 0; t.end = 0; }
+      let next = mdat.body;                       // where the next run's frames are, if not stated
+      for (const trun of kids(d, traf.body, traf.end).filter(b => b.type === 'trun')) {
+        const tf = u32(d, trun.body) & 0xffffff, n = u32(d, trun.body + 4);
+        let p = trun.body + 8, pos = next, firstFlags = -1;
+        if (tf & 1) { pos = base + s32(d, p); p += 4; }
+        if (tf & 4) { firstFlags = u32(d, p); p += 4; }
+        const chunkAt = pos;
+        for (let k = 0; k < n; k++) {
+          const sd = tf & 0x100 ? u32(d, (p += 4) - 4) : dur;
+          const ss = tf & 0x200 ? u32(d, (p += 4) - 4) : size;
+          let sf = tf & 0x400 ? u32(d, (p += 4) - 4) : flags;
+          if (k === 0 && firstFlags >= 0) sf = firstFlags;
+          const sc = tf & 0x800 ? s32(d, (p += 4) - 4) : 0;
+          t.durs.push(sd); t.sizes.push(ss); t.ctos.push(sc);
+          t.sync.push(!(sf & 0x10000));
+          t.end += sd; pos += ss;
+        }
+        // Every frame must be inside the frames box right after its list.
+        if (n && (chunkAt < mdat.body || pos > mdat.end)) throw new Error('frame outside its piece');
+        if (n) t.chunks.push([chunkAt, n]);
+        next = pos;
       }
-      if (group.frames.length) groups.push(group);
     }
   }
-  const N = times.length;
-  if (N < 30) return leave(about + ' · frame times: clip too short to smooth');
+  const list = [...tracks.values()].filter(t => t.sizes.length);
+  if (!list.length) throw new Error('no frames');
+  for (const t of list) if (t.start < 0) t.start = 0;
 
-  // 4. The steady beat. Split the clip wherever the camera really paused
-  //    (a gap of more than 3 frames), and inside each stretch put the frames
-  //    evenly on the beat, following the real timing over about a second.
-  const beat = scale / 30;
-  const gapsBefore = times.slice(1).map((t, i) => t - times[i]);
-  const fresh = new Array(N);
-  const starts = [0];
-  gapsBefore.forEach((g, i) => { if (g > 3 * beat) starts.push(i + 1); });
-  starts.forEach((a, s) => {
-    const b = s + 1 < starts.length ? starts[s + 1] : N, n = b - a;
-    const step = n >= 30 ? (times[b - 1] - times[a]) / (n - 1) : beat;   // this stretch's real speed
-    const sum = [0];
-    for (let k = 0; k < n; k++) sum.push(sum[k] + times[a + k] - k * step);
-    for (let k = 0; k < n; k++) {
-      const lo = Math.max(0, k - 15), hi = Math.min(n, k + 16);
-      fresh[a + k] = Math.round(k * step + (sum[hi] - sum[lo]) / (hi - lo));
-    }
-  });
-  for (let i = 1; i < N; i++) if (fresh[i] <= fresh[i - 1]) fresh[i] = fresh[i - 1] + 1;
-  let moved = 0;
-  for (let i = 0; i < N; i++) moved = Math.max(moved, Math.abs(fresh[i] - times[i]));
-  const ms = x => Math.round(x * 1000 / scale);
-  if (moved > scale * 0.08) return leave(about + ` · frame times: smoothing would move a frame ${ms(moved)} ms, left as recorded`);
-  const freshLen = i => i + 1 < N ? fresh[i + 1] - fresh[i] : lens[N - 1] + times[N - 1] - fresh[N - 1];
-  if (freshLen(N - 1) < 1) return leave(about + ' · frame times: odd ending, left as recorded');
-
-  // 5. Write the new times into the frame lists (same sizes, so nothing else
-  //    in the file moves), and glue the file back together.
-  for (const g of groups) {
-    const t0 = fresh[g.first];
-    if (g.v1) put64(g.d, g.tfdtAt, t0);
-    else if (t0 < 2 ** 32) put32(g.d, g.tfdtAt, t0);
-    else return leave(about + ' · frame times: clip too long to smooth');
-    const shared = [];
-    g.frames.forEach((lenAt, k) => {
-      if (lenAt >= 0) put32(g.d, lenAt, freshLen(g.first + k));
-      else shared.push(freshLen(g.first + k));
+  // 4. Even out the video frame times (see the note at the top).
+  let smooth = '';
+  const v = list.find(t => t.kind === 'vide');
+  if (v && v.sizes.length >= 30) {
+    const N = v.sizes.length, beat = v.scale / 30;
+    const times = [v.start];
+    for (let i = 1; i < N; i++) times.push(times[i - 1] + v.durs[i - 1]);
+    const starts = [0];
+    for (let i = 1; i < N; i++) if (times[i] - times[i - 1] > 3 * beat) starts.push(i);   // real camera pauses
+    const fresh = new Array(N);
+    starts.forEach((a, s) => {
+      const b = s + 1 < starts.length ? starts[s + 1] : N, n = b - a;
+      const step = n >= 30 ? (times[b - 1] - times[a]) / (n - 1) : beat;   // this stretch's real speed
+      const sum = [0];
+      for (let k = 0; k < n; k++) sum.push(sum[k] + times[a + k] - k * step);
+      for (let k = 0; k < n; k++) {
+        const lo = Math.max(0, k - 15), hi = Math.min(n, k + 16);
+        fresh[a + k] = Math.round(k * step + (sum[hi] - sum[lo]) / (hi - lo));
+      }
     });
-    if (shared.length) put32(g.d, g.defAt, Math.round(shared.reduce((x, y) => x + y, 0) / shared.length));
+    if (fresh[0] < 0) fresh[0] = 0;
+    for (let i = 1; i < N; i++) if (fresh[i] <= fresh[i - 1]) fresh[i] = fresh[i - 1] + 1;
+    let moved = 0;
+    for (let i = 0; i < N; i++) moved = Math.max(moved, Math.abs(fresh[i] - times[i]));
+    const endAt = v.start + v.durs.reduce((a, b) => a + b, 0);
+    const ms = x => Math.round(x * 1000 / v.scale);
+    if (moved <= v.scale * 0.08 && endAt - fresh[N - 1] >= 1) {
+      const before = v.durs.slice(0, -1);
+      for (let i = 0; i < N - 1; i++) v.durs[i] = fresh[i + 1] - fresh[i];
+      v.durs[N - 1] = endAt - fresh[N - 1];
+      v.start = fresh[0];
+      const range = a => a.length ? a.reduce((x, y) => Math.min(x, y)) + '–' + a.reduce((x, y) => Math.max(x, y)) : '–';
+      smooth = ` · frame times evened: gaps were ${range(before.map(ms))} ms, now ${range(v.durs.slice(0, -1).filter((g, i) => !starts.includes(i + 1)).map(ms))} ms (moved ≤ ${ms(moved)} ms)`;
+    } else smooth = ` · frame times left as recorded (evening out would move a frame ${ms(moved)} ms)`;
   }
-  const parts = top.map(b => moofs.get(b) || blob.slice(b.start, b.end));
-  const range = arr => Math.min(...arr) + '–' + Math.max(...arr);
-  const after = fresh.slice(1).map((t, i) => t - fresh[i]).filter((g, i) => !starts.includes(i + 1));
-  return {
-    blob: new Blob(parts, { type: blob.type }),
-    note: `${about} · ${N} frames smoothed: gaps were ${range(gapsBefore.map(ms))} ms, now ${range(after.map(ms))} ms (moved ≤ ${ms(moved)} ms)`
+  for (const t of list) t.total = t.durs.reduce((a, b) => a + b, 0);
+
+  // 5. Write the new header. Small helpers that build plain byte arrays.
+  const box = (type, ...parts) => {
+    const body = parts.flat(Infinity);
+    let len = 8;
+    for (const x of body) len += x.length;
+    const out = new Uint8Array(len);
+    new DataView(out.buffer).setUint32(0, len);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    let o = 8;
+    for (const x of body) { out.set(x, o); o += x.length; }
+    return out;
   };
+  // num(32, 5, 6) or num(32, [lots of numbers]): no "...spread" of long
+  // lists, because Safari refuses calls with more than ~65,000 arguments.
+  const num = (bits, ...vals) => {
+    vals = vals.flat();
+    const out = new Uint8Array(vals.length * bits / 8), dv = new DataView(out.buffer);
+    vals.forEach((x, i) => {
+      if (bits === 32) dv.setUint32(i * 4, x >>> 0);
+      else if (bits === 64) { dv.setUint32(i * 8, Math.floor(x / 2 ** 32)); dv.setUint32(i * 8 + 4, x % 2 ** 32); }
+      else out[i] = x;
+    });
+    return out;
+  };
+  const text = s => num(8, [...s].map(c => c.charCodeAt(0)));
+  const full = (ver, flags) => num(32, ((ver << 24) | flags) >>> 0);
+  const copy = b => m.slice(b.start, b.end);
+  // The same mvhd / tkhd / mdhd box with its length-of-video filled in.
+  const withDuration = (b, value, at0, at1) => {
+    const out = copy(b), dv = new DataView(out.buffer), body = b.body - b.start;
+    if (out[body] === 1) { dv.setUint32(body + at1, Math.floor(value / 2 ** 32)); dv.setUint32(body + at1 + 4, value % 2 ** 32); }
+    else if (value < 2 ** 32) dv.setUint32(body + at0, value);
+    else throw new Error('too long');
+    return out;
+  };
+  const runs = arr => {                            // [count, value] runs of equal values
+    const out = [];
+    for (const x of arr) { const r = out[out.length - 1]; if (r && r[1] === x) r[0]++; else out.push([1, x]); }
+    return out;
+  };
+  const toMovie = (x, t) => Math.round(x * movieScale / t.scale);
+  const movieDur = list.map(t => toMovie(t.start + t.total, t)).reduce((x, y) => Math.max(x, y));
+  const stbl = (t, shift, big) => {
+    const stts = runs(t.durs);
+    const parts = [copy(t.stsd), box('stts', full(0, 0), num(32, stts.length), stts.map(r => num(32, r[0], r[1])))];
+    if (t.ctos.some(x => x !== 0)) {
+      const c = runs(t.ctos);
+      parts.push(box('ctts', full(1, 0), num(32, c.length), c.map(r => num(32, r[0], r[1]))));
+    }
+    if (t.sync.some(x => !x)) {
+      const keys = [];
+      t.sync.forEach((s, i) => { if (s) keys.push(i + 1); });
+      parts.push(box('stss', full(0, 0), num(32, keys.length), num(32, keys)));
+    }
+    const stsc = [];
+    t.chunks.forEach(([, n], i) => { if (!stsc.length || stsc[stsc.length - 1][1] !== n) stsc.push([i + 1, n]); });
+    parts.push(box('stsc', full(0, 0), num(32, stsc.length), stsc.map(r => num(32, r[0], r[1], 1))));
+    parts.push(box('stsz', full(0, 0), num(32, 0, t.sizes.length), num(32, t.sizes)));
+    const offsets = t.chunks.map(([pos]) => pos + shift);
+    parts.push(big ? box('co64', full(0, 0), num(32, offsets.length), num(64, offsets))
+                   : box('stco', full(0, 0), num(32, offsets.length), num(32, offsets)));
+    return box('stbl', parts);
+  };
+  const header = (shift, big) => box('moov',
+    withDuration(mvhd, movieDur, 16, 24),
+    list.map(t => {
+      // Edit list: Safari's tracks often start a few hundredths of a second
+      // after 0; keep that tiny delay so sound and picture stay in sync.
+      const edits = [];
+      if (t.start > 0) edits.push(num(32, toMovie(t.start, t), 0xffffffff, 0x00010000));
+      edits.push(num(32, toMovie(t.total, t), 0, 0x00010000));
+      const minfKids = kids(m, t.minf.body, t.minf.end).filter(b => b.type !== 'stbl').map(copy);
+      return box('trak',
+        withDuration(t.tkhd, toMovie(t.start + t.total, t), 20, 28),
+        box('edts', box('elst', full(0, 0), num(32, edits.length), edits)),
+        box('mdia', withDuration(t.mdhd, t.total, 16, 24), copy(t.hdlr), box('minf', minfKids, stbl(t, shift, big))));
+    }),
+    moovKids.filter(b => b.type === 'udta').map(copy));
+  const ftyp = box('ftyp', text('mp42'), num(32, 0), text('isom'), text('mp42'), text('mp41'));
+  // [ftyp][moov][mdat header] + the WHOLE recording (never cut up).
+  let big = blob.size + 2 ** 24 > 2 ** 32;        // over ~4 GB needs the long number formats
+  const mdatHead = size => big ? [num(32, 1), text('mdat'), num(64, size + 16)] : [num(32, size + 8), text('mdat')];
+  const headLen = mdatHead(blob.size).reduce((a, x) => a + x.length, 0);
+  let moov = header(0, big);                      // first pass: just to learn the header's size
+  moov = header(ftyp.length + moov.length + headLen, big);
+  const out = new Blob([ftyp, moov, ...mdatHead(blob.size), blob], { type: 'video/mp4' });
+  const seconds = movieDur / movieScale;
+
+  // For the private log: the picture/sound format and what was found.
+  const about = list.map(t => {
+    const e = kids(m, t.stsd.body + 8, t.stsd.end)[0];
+    if (!e) return t.kind;
+    if (t.kind === 'vide') {
+      const cfg = kids(m, e.body + 78, e.end).find(b => b.type === 'avcC');
+      const prof = cfg ? ({ 66: 'Baseline', 77: 'Main', 100: 'High' }[m[cfg.body + 1]] || 'profile ' + m[cfg.body + 1]) : '';
+      return `video ${e.type} ${prof} ${u16(m, e.body + 24)}x${u16(m, e.body + 26)} ${t.sizes.length} frames`;
+    }
+    return `sound ${e.type} ${u16(m, e.body + 24)} Hz`;
+  }).join(' · ');
+  const jumble = top.filter(b => b.type === 'moov').length > 1 || repeats ? ` · REPAIRED jumbled file (${repeats} repeated pieces skipped)` : '';
+  return { blob: out, seconds, note: `${seconds.toFixed(1)} s, ${pieces} pieces · ${about}${smooth}${jumble}` };
 }
 
 // START: switch the camera + microphone on, then record. Used by the Start
@@ -1929,47 +2053,63 @@ function store(mode, job) {
 }
 // The details we keep about a clip (everything but the video itself).
 function metaOf(c) {
-  return { id: c.id, no: c.no, name: c.name, type: c.type, length: c.length, camera: c.camera, paused: c.paused || 0, at: c.at, saved: !!c.saved, savedAt: c.savedAt || 0, size: c.size };
+  return { id: c.id, no: c.no, name: c.name, type: c.type, length: c.length, camera: c.camera, paused: c.paused || 0, at: c.at, saved: !!c.saved, savedGood: !!c.savedGood, savedAt: c.savedAt || 0, size: c.size };
 }
 
 // FINISH: runs once a recorder has bundled all its pieces into one file.
 async function finish(rec, pieces) {
   const type = (rec.mimeType || 'video/mp4').includes('mp4') ? 'video/mp4' : (rec.mimeType || 'video/webm');
-  // A "Blob" is the finished video held in memory. We glue the pieces together,
-  // then put the frames back on an even beat (see 6b). Never waits more than
-  // 15 seconds: if smoothing is slow or fails, the clip is kept as recorded.
-  let blob = new Blob(pieces, { type });
-  if (type === 'video/mp4') {
-    try {
-      const done = await Promise.race([smoothFrames(blob), new Promise(ok => setTimeout(() => ok(null), 15000))]);
-      if (done) { blob = done.blob; log('clip ' + rec.takeNo + ': ' + done.note); }
-      else log('clip ' + rec.takeNo + ': frame times: smoothing took too long, left as recorded');
-    } catch (e) {
-      log('clip ' + rec.takeNo + ': frame times: ' + e + ', left as recorded');
-    }
-  }
+  // A "Blob" is the recording held in memory: all the pieces glued together,
+  // whole. (Never cut pieces out of it to build a new file: on iPhone that's
+  // what jumbled long clips. See 6b.)
+  const blob = new Blob(pieces, { type });
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   const name = `recording-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.${type === 'video/mp4' ? 'mp4' : 'webm'}`;
-  const clip = { id: d.getTime(), no: rec.takeNo, blob, name, type, length: rec.lengthMs, camera: rec.camera, paused: rec.pausedMs || 0, at: d.getTime(), size: blob.size, saved: false };
-  // The file the save buttons hand to iPhone, made now so a tap has nothing to wait for.
-  clip.file = new File([blob], name, { type });
+  const clip = { id: d.getTime(), no: rec.takeNo, blob, name, type, length: rec.lengthMs, camera: rec.camera, paused: rec.pausedMs || 0, at: d.getTime(), size: blob.size, saved: false, ready: false };
   clips.push(clip);
   showClipCount();
   if (clipsScreen.classList.contains('open')) showClips();
-  // Keep it on the phone, then use the phone's copy (so it isn't held in memory).
+  // Keep the recording on the phone exactly as recorded, then use the
+  // phone's copy (so it isn't held in memory).
   try {
     await store('readwrite', (meta, video) => { meta.put(metaOf(clip)); video.put({ id: clip.id, blob }); });
     const kept = await store('readonly', (meta, video) => video.get(clip.id));
-    if (kept && kept.blob) { clip.blob = kept.blob; clip.file = new File([kept.blob], name, { type }); }
+    if (kept && kept.blob) clip.blob = kept.blob;
     clip.kept = true;
   } catch (e) {
     // Most likely a Private tab: Safari can't keep videos there. The clip
     // still waits here, in memory, until the page closes.
     clip.kept = false;
     log('could not keep clip on the phone: ' + e);
-    if (clipsScreen.classList.contains('open')) showClips();
   }
+  await prepareFile(clip);
+}
+
+/* PREPARE THE FILE YOU SAVE
+   The recording kept on the phone is never changed. The file handed to
+   Photos / Files is made from it by makeNormalFile (6b): a normal video file
+   with the full frame list, which also repairs clips that were jumbled before
+   the fix. Made ahead of time, because the save menu must open straight from
+   your tap. If anything goes wrong, you get the recording exactly as kept. */
+async function prepareFile(clip) {
+  let blob = clip.blob, note;
+  if (clip.type === 'video/mp4') {
+    try {
+      const done = await makeNormalFile(clip.blob);
+      blob = done.blob;
+      note = done.note;
+    } catch (e) {
+      note = 'could not make a normal file (' + (e && e.message || e) + '), saving it as recorded';
+    }
+  }
+  clip.file = new File([blob], clip.name, { type: clip.type });
+  clip.size = clip.file.size;
+  if (clip.url) { URL.revokeObjectURL(clip.url); clip.url = null; }
+  clip.ready = true;
+  log('clip ' + clip.no + ': ' + (note || 'ready'));
+  showClipCount();
+  if (clipsScreen.classList.contains('open')) showClips();
 }
 
 // When the page opens: bring back the clips kept on this phone. Nothing is
@@ -1982,13 +2122,18 @@ async function loadKeptClips() {
       const v = videos.find(x => x.id === m.id);
       if (!v || !v.blob) continue;                     // no video stored: skip, but delete nothing
       if (clips.some(c => c.id === m.id)) continue;
-      clips.push({ ...m, blob: v.blob, file: new File([v.blob], m.name, { type: m.type }), kept: true });
+      // Saved before the Nov 2026 fix? Then the copy in Photos may be the
+      // broken 2-second one, so it counts as waiting to be saved again.
+      const saved = !!(m.saved && m.savedGood);
+      clips.push({ ...m, saved, blob: v.blob, kept: true, ready: false });
     }
     clips.sort((a, b) => a.id - b.id);
     takes = Math.max(takes, 0, ...clips.map(c => c.no));
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   } catch (e) { /* no storage: clips live in memory only */ }
   showClipCount();
+  // Make each clip's file, newest first, one at a time.
+  for (const c of clips.slice().reverse()) if (!c.ready && c.blob) await prepareFile(c);
 }
 function forget(id) { return store('readwrite', (meta, video) => { meta.delete(id); video.delete(id); }).catch(() => {}); }
 
@@ -2017,7 +2162,7 @@ const SHARE_LIMIT = 600 * 1024 * 1024;
 let sharing = null;         // 'all' or a clip id, while a save menu is opening (or open)
 
 // The waiting clips that go in the next "Save all" (oldest first).
-function nextBatch(list = clips.filter(c => !c.saved), limit = SHARE_LIMIT) {
+function nextBatch(list = clips.filter(c => !c.saved && c.ready), limit = SHARE_LIMIT) {
   const batch = [];
   let total = 0;
   for (const c of list) {
@@ -2029,6 +2174,7 @@ function nextBatch(list = clips.filter(c => !c.saved), limit = SHARE_LIMIT) {
 }
 
 function shareClips(list, tag) {
+  list = list.filter(c => c.ready && c.file);         // only clips whose file is made
   if (sharing || !list.length) return;                // a menu is already on its way
   saveMsg('');
   const files = list.map(c => c.file);
@@ -2056,27 +2202,29 @@ function shareClips(list, tag) {
 
 function markSaved(list) {
   const now = Date.now();
-  list.forEach(c => { c.saved = true; c.savedAt = now; });
+  list.forEach(c => { c.saved = true; c.savedGood = true; c.savedAt = now; });
   store('readwrite', meta => { list.forEach(c => meta.put(metaOf(c))); }).catch(() => {});
   showClipCount();
 }
 
 // A link to a clip's file, for the "Files" download.
-function urlOf(c) { return c.url || (c.url = URL.createObjectURL(c.blob)); }
+function urlOf(c) { return c.url || (c.url = URL.createObjectURL(c.file)); }
 
 // Draw the clips screen.
 function showClips() {
   const waiting = clips.filter(c => !c.saved);
-  const batch = nextBatch(waiting);
+  const batch = nextBatch(waiting.filter(c => c.ready));
+  const fixing = waiting.filter(c => !c.ready).length;
   const btn = $('saveAllBtn');
   btn.classList.toggle('busy', sharing === 'all');
   btn.classList.toggle('done', !waiting.length);
-  btn.disabled = !waiting.length;
+  btn.disabled = !batch.length;
   btn.textContent = sharing === 'all' ? 'Opening the save menu…'
     : !waiting.length ? '✓ All clips saved to Photos'
+    : !batch.length ? `Getting ${fixing === 1 ? 'the clip' : fixing + ' clips'} ready…`
     : batch.length < waiting.length ? `Save ${batch.length} of ${waiting.length} to Photos`
     : waiting.length === 1 ? 'Save clip to Photos' : `Save all ${waiting.length} to Photos`;
-  $('saveAllHelp').innerHTML = waiting.length
+  $('saveAllHelp').innerHTML = batch.length
     ? `Then choose <b>${batch.length === 1 ? 'Save Video' : 'Save ' + batch.length + ' Videos'}</b> in the menu that opens (in the list under the row of apps).`
     : '';
   const time = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -2085,8 +2233,8 @@ function showClips() {
       <div class="clipInfo"><b>Clip ${c.no}</b> · ${clock(c.length)} ${c.saved ? '<span class="ok">✓ saved</span>' : ''}
         <small>${esc(c.camera || '')} · ${time(c.at)} · ${Math.max(1, Math.round((c.size || 0) / 1048576))} MB</small>
         ${c.paused >= 1000 ? `<small class="warn">⚠ Camera paused ${clock(c.paused)} (page was covered)</small>` : ''}</div>
-      <button class="oneBtn" data-id="${c.id}"${sharing ? ' disabled' : ''}>${sharing === c.id ? '…' : 'Photos'}</button>
-      <a class="filesLink" data-id="${c.id}" href="#">Files</a>
+      <button class="oneBtn" data-id="${c.id}"${sharing || !c.ready ? ' disabled' : ''}>${sharing === c.id ? '…' : c.ready ? 'Photos' : 'Getting ready…'}</button>
+      ${c.ready ? `<a class="filesLink" data-id="${c.id}" href="#">Files</a>` : ''}
       <button class="delBtn" data-id="${c.id}" aria-label="Delete clip ${c.no}">✕</button>
     </div>`).join('');
   $('keepNote').style.display = clips.some(c => c.kept === false && !c.saved) ? 'block' : 'none';
@@ -2480,6 +2628,7 @@ $('clipList').addEventListener('click', e => {
   if (!t) return;
   const clip = clips.find(c => c.id === +t.dataset.id);
   if (!clip) return;
+  if (!clip.ready && !t.classList.contains('delBtn')) return;   // its file is still being made
   if (t.classList.contains('oneBtn')) shareClips([clip], clip.id);
   else if (t.classList.contains('filesLink')) {
     // A plain download: goes to the Files app (Downloads).
@@ -2487,7 +2636,7 @@ $('clipList').addEventListener('click', e => {
     const a = document.createElement('a');
     a.href = urlOf(clip); a.download = clip.name; a.click();
   } else if (t.classList.contains('delBtn')) {
-    if (!confirm('Delete clip ' + clip.no + '?' + (clip.saved ? '' : ' It hasn’t been saved to Photos yet.'))) return;
+    if (!confirm('Delete clip ' + clip.no + ' from this page for good?' + (clip.saved ? ' Check it plays fully in Photos first.' : ' It hasn’t been saved to Photos yet.'))) return;
     clips.splice(clips.indexOf(clip), 1);
     forget(clip.id);
     showClips(); showClipCount();
