@@ -193,13 +193,13 @@
       display: flex; flex-direction: column; gap: 8px;
       z-index: 70; pointer-events: none;
     }
-    #pairWarn, #allowWarn {
+    #pairWarn, #allowWarn, #relayWarn {
       background: #3a3216; color: #ffe9a8; border: 1px solid #5c4d1c;
       border-radius: 12px; padding: 11px 14px;
       font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.4;
       display: none; pointer-events: auto;
     }
-    #pairWarn.show, #allowWarn.show { display: block; }
+    #pairWarn.show, #allowWarn.show, #relayWarn.show { display: block; }
 
     /* ========================================================================
        CSS SECTION 5 — THE TOP BAR  (the page's name, and Video / Text)
@@ -813,6 +813,10 @@
     <div id="allowWarn"><b>One Safari setting needed</b> so the Action Button
       can start recording in full screen: tap <b>aA → Website Settings</b> and
       set <b>Camera</b> and <b>Microphone</b> to <b>Allow</b>. (Tap to hide.)</div>
+    <div id="relayWarn"><b>Action Button can't get through right now.</b> The free
+      relay it uses (ntfy.sh) refused a message: its daily limit for this
+      internet connection is used up. It frees up again within a day. The
+      on-screen Start button still works. (Tap to hide.)</div>
   </div>
 
 <script>
@@ -2092,7 +2096,7 @@ async function finish(rec, pieces) {
    with the full frame list, which also repairs clips that were jumbled before
    the fix. Made ahead of time, because the save menu must open straight from
    your tap. If anything goes wrong, you get the recording exactly as kept. */
-async function prepareFile(clip) {
+async function prepareFile(clip, quiet) {
   let blob = clip.blob, note;
   if (clip.type === 'video/mp4') {
     try {
@@ -2107,7 +2111,8 @@ async function prepareFile(clip) {
   clip.size = clip.file.size;
   if (clip.url) { URL.revokeObjectURL(clip.url); clip.url = null; }
   clip.ready = true;
-  log('clip ' + clip.no + ': ' + (note || 'ready'));
+  clip.note = note || 'ready';
+  if (!quiet) log('clip ' + clip.no + ': ' + clip.note);   // a new recording: one note
   showClipCount();
   if (clipsScreen.classList.contains('open')) showClips();
 }
@@ -2132,8 +2137,15 @@ async function loadKeptClips() {
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   } catch (e) { /* no storage: clips live in memory only */ }
   showClipCount();
-  // Make each clip's file, newest first, one at a time.
-  for (const c of clips.slice().reverse()) if (!c.ready && c.blob) await prepareFile(c);
+  // Make each clip's file, newest first, one at a time. Quietly: one short
+  // note for the whole lot, and only if something needed repairing or failed.
+  const done = [];
+  for (const c of clips.slice().reverse()) if (!c.ready && c.blob) { await prepareFile(c, true); done.push(c); }
+  const fixed = done.filter(c => /REPAIRED/.test(c.note)).map(c => c.no);
+  const failed = done.filter(c => /could not/.test(c.note)).map(c => c.no + ' (' + c.note + ')');
+  if (fixed.length || failed.length) log('clips on this phone: ' + done.length +
+    (fixed.length ? ' · repaired: ' + fixed.sort((a, b) => a - b).join(', ') : '') +
+    (failed.length ? ' · NOT repaired: ' + failed.join('; ') : ''));
 }
 function forget(id) { return store('readwrite', (meta, video) => { meta.delete(id); video.delete(id); }).catch(() => {}); }
 
@@ -2512,14 +2524,47 @@ async function answerPress() {
   }
   const fine = result.ok && !result.text.includes('⚠');   // a warning (e.g. camera paused) counts as a problem
   if (!fine) toast(result.text);                          // problems only: no pop-up when it just worked
-  fetch(RELAY + lineCode + '_r', { method: 'POST', body: fine ? ALL_GOOD : result.text }).catch(() => {});
+  relayPost('_r', fine ? ALL_GOOD : result.text);
 }
 
 // A short private note to ntfy.sh, on a third channel (pair code + "_d"), about
 // what the page is doing, e.g. "listening". Only the person holding the pair
 // code can read it. It exists so problems can be tracked down remotely.
+//
+// IMPORTANT: ntfy.sh lets one internet connection send only about 250
+// messages a day, and the Action Button's own presses count towards that.
+// (In Nov 2026 the page sent one note per clip every time it opened, which
+// used the allowance up, and then the Action Button silently stopped working.)
+// So notes are bundled: everything from a few seconds goes as ONE message,
+// and a page sends at most 20 of them per visit.
+let logLines = [], logTimer = null, logSent = 0;
 function log(text) {
-  if (lineCode) fetch(RELAY + lineCode + '_d', { method: 'POST', body: text }).catch(() => {});
+  logLines.push(text);
+  if (!logTimer) logTimer = setTimeout(flushLog, 4000);
+}
+function flushLog() {
+  logTimer = null;
+  if (!lineCode || !logLines.length) return;
+  if (logSent >= 20) { logLines = []; return; }      // enough for one visit
+  logSent++;
+  relayPost('_d', logLines.join('\n'));
+  logLines = [];
+}
+// Send something to the relay, and notice if it refuses (daily limit used up).
+function relayPost(channel, body) {
+  if (!lineCode) return;
+  fetch(RELAY + lineCode + channel, { method: 'POST', body })
+    .then(r => { if (r.status === 429) relayRefused(); else if (r.ok) relayFine(); })
+    .catch(() => {});
+}
+function relayRefused() {
+  try { localStorage.setItem('relayRefusedAt', Date.now()); } catch (e) {}
+  const w = $('relayWarn');
+  if (!w.dataset.hidden) w.classList.add('show');
+}
+function relayFine() {
+  try { localStorage.removeItem('relayRefusedAt'); } catch (e) {}
+  $('relayWarn').classList.remove('show');
 }
 
 // Pop up a short message for a few seconds.
@@ -2669,6 +2714,7 @@ $('fontSize').addEventListener('input', e => {
 // Tap a yellow strip to hide it for this visit.
 pairWarn.addEventListener('click', () => { pairWarn.dataset.hidden = '1'; pairWarn.classList.remove('show'); });
 $('allowWarn').addEventListener('click', () => { $('allowWarn').dataset.hidden = '1'; $('allowWarn').classList.remove('show'); });
+$('relayWarn').addEventListener('click', () => { $('relayWarn').dataset.hidden = '1'; $('relayWarn').classList.remove('show'); });
 // Check the Safari setting again whenever you come back to the page.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkCameraSetting(); });
 window.addEventListener('pageshow', checkCameraSetting);
